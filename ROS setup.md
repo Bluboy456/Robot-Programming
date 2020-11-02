@@ -1,4 +1,10 @@
-# Set-up commands
+# Set-up ROS and CMP9767m
+
+sudo apt-get update && sudo apt-get upgrade
+sudo apt-get install ros-melodic-uol-cmp9767m-base 
+(if this latter resulted in error, there's a conflicting package installed, try sudo apt-get purge "*gazebo*" first, and then install again). 
+source /opt/ros/melodic/setup.bash
+
 
 # to create workspace
 source /opt/ros/melodic/setup.bash
