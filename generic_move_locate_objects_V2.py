@@ -18,25 +18,25 @@ class move_and_turn:
         rate = rospy.Rate(3)
         self.sub = rospy.Subscriber('/thorvald_001/scan', LaserScan, self.callback)   #subscribe to laser to get distance messages to get distances
         self.pub = rospy.Publisher('/thorvald_001/twist_mux/cmd_vel', Twist, queue_size=1)  #publisher for speed and turn to robot
-        self.obstacle_pub = rospy.Publisher('obstacle_pose', geometry_msgs.msg.PoseStamped, queue_size=1)
+        self.base_pub = rospy.Publisher('base_pose', geometry_msgs.msg.PoseStamped, queue_size=1)
+        self.scan_pub = rospy.Publisher('scan_pose', geometry_msgs.msg.PoseStamped, queue_size=1)
         self.motion = Twist()
         self.direction = 'left'
         self.obstacle_x = 10.0
         self.obstacle_y = 10.0
         self.angle_to_obstacle = 0.0
         self.distance_to_obstacle = 10.0
+        
         # get transform from laser scanner (hokuyo to base_link), only need to do it once as static
         self.listener = tf.TransformListener()
-        self.listener.waitForTransform('thorvald_001/hokuyo', 'thorvald_001/base_link', rospy.Time(0), rospy.Duration(5))
-        self.laser_to_base = self.listener.lookupTransform('thorvald_001/hokuyo', 'thorvald_001/base_link', rospy.Time())
+
+        
         rospy.spin()
 
     def callback (self, msg):      # called when a laser message arrives, extracts front, left and right distances
         rospy.spin
         self.ranges = msg.ranges
         self.angle_increment = msg.angle_increment
-
-
        
         # calculate x, y co-ordinate of closest obstacle, realtive to scanner
         #first work out whether closest obstacle is in left or right sectors
@@ -48,28 +48,29 @@ class move_and_turn:
         else:
             self.distance_to_obstacle = self.clearance_left
             self.angle_to_obstacle = self.angle_left
-        #print ('distance_to_obstacle = ' + str(self.distance_to_obstacle))  #DEBUG
-        #print ('angle_to_obstacle = ' + str(self.angle_to_obstacle +'\n'))    #DEBUG
 
-        # Convert polar to cartesian coordinates
+
+        # Convert polar to cartesian coordinates and publish as a pose
         self.obstacle_x = self.distance_to_obstacle * math.cos(self.angle_to_obstacle)
         self.obstacle_y = self.distance_to_obstacle * math.sin(self.angle_to_obstacle )   # negative to the right
-        #print ('obstacle_x: ' + str(self.obstacle_x) )   #DEBUG
-        #print ('obstacle_x: ' + str(self.obstacle_y) +'\n') #DEBUG
 
-        #calculate obstacle postion relative to base_link and publish as a pose
-        self.laser_to_base = self.listener.lookupTransform('thorvald_001/hokuyo', 'thorvald_001/base_link', rospy.Time())
-        print('self.laser_to_base: ')
-        print(self.laser_to_base)
+        self.p_scan = geometry_msgs.msg.PoseStamped()
+        self.p_scan.header.frame_id = "thorvald_001/hokuyo"
+        self.p_scan.pose.orientation.w = 1.0  # No rotation
+        self.p_scan.pose.position.x = self.obstacle_x
+        self.p_scan.pose.position.y = self.obstacle_y
+        self.scan_pub.publish(self.p_scan)   
+  
+
         
-        self.p1 = geometry_msgs.msg.PoseStamped()
-        self.p1.header.frame_id = "thorvald_001/base_link"
-        self.p1.pose.orientation.w = 1.0  # No rotation
-        self.p1.pose.position.x = self.obstacle_x - self.laser_to_base[0][0]
-        self.p1.pose.position.y = self.obstacle_y - self.laser_to_base[0][1]
-        self.obstacle_pub.publish(self.p1)   
-        print('self.p1.pose.position: ')
-        print(self.p1.pose.position)
+        #calculate obstacle postion relative to base_link and publish as a pose 
+        self.laser_to_base = self.listener.lookupTransform('thorvald_001/hokuyo', 'thorvald_001/base_link', rospy.Time())
+        self.p_base = geometry_msgs.msg.PoseStamped()
+        self.p_base.header.frame_id = "thorvald_001/base_link"
+        self.p_base.pose.orientation.w = 1.0  # No rotation
+        self.p_base.pose.position.x = self.obstacle_x - self.laser_to_base[0][0]
+        self.p_base.pose.position.y = self.obstacle_y - self.laser_to_base[0][1]
+        self.base_pub.publish(self.p_base)   
         
          #does it need to turn left?
         if self.clearance_right < 1.0:  
