@@ -24,3 +24,6 @@ source devel/setup.bash  (now in setup.bash)
 
 # to run thorvald:
 roslaunch uol_cmp9767m_base thorvald-sim.launch fake_localisation:=true
+
+# to run rviz
+rviz -d `rospack find uol_cmp9767m_base`/rviz/two_robots.rviz
