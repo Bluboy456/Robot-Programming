@@ -7,12 +7,12 @@ source /opt/ros/melodic/setup.bash
 
 
 # to create workspace
-source /opt/ros/melodic/setup.bash
-mkdir–p ~/catkin_ws/src
-cd ~/catkin_ws/src
-catkin_init_workspace
-cd ~/catkin_ws
-catkin_make or catkin build
+source /opt/ros/melodic/setup.bash  
+mkdir–p ~/catkin_ws/src  
+cd ~/catkin_ws/src  
+catkin_init_workspace  
+cd ~/catkin_ws  
+catkin_make or catkin build  
 
 # To create a new package:
 cd ~/catkin_ws/src
