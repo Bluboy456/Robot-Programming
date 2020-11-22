@@ -27,3 +27,12 @@ roslaunch uol_cmp9767m_base thorvald-sim.launch fake_localisation:=true
 
 # to run rviz
 rviz -d `rospack find uol_cmp9767m_base`/rviz/two_robots.rviz
+
+# git commands
+Code should be in ~/catkin_ws/src/my_examples/src/scripts/Robot-Programming
+cd to this directory
+git add .
+git commit
+Type commit message, ctrl o ctrl x to save and exit
+git push Bluboy456  smxxxxxxxx8
+
