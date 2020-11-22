@@ -9,6 +9,8 @@ from sensor_msgs.msg import LaserScan, Image
 from cv_bridge import CvBridge, CvBridgeError
 import cv2
 import numpy as np
+from uol_cmp9767m_tutorial.srv import *
+from std_srvs.srv import Empty
 
 
 class move_find_green:
@@ -32,6 +34,7 @@ class move_find_green:
         self.obstacle_y = 10.0
         self.angle_to_obstacle = 0.0
         self.distance_to_obstacle = 10.0
+        self.stopped = False
 
         self.bridge_object = CvBridge()
         
@@ -41,24 +44,25 @@ class move_find_green:
         rospy.spin()
 
     def laser_callback (self, msg):      # called when a laser message arrives, extracts front, left and right distances
-        rospy.spin
-        self.ranges = msg.ranges
-        self.angle_increment = msg.angle_increment
-        self.clearance_right, self.angle_right = self.right_sector_clearance()
-        self.clearance_left, self.angle_left = self.left_sector_clearance()         
-    
-         #does it need to turn left?
-        if self.clearance_right < 1.0:  
-            self.rotate('left')
+        if self.stopped == False:        #check stopped flag first before doing anything
+            rospy.spin
+            self.ranges = msg.ranges
+            self.angle_increment = msg.angle_increment
+            self.clearance_right, self.angle_right = self.right_sector_clearance()
+            self.clearance_left, self.angle_left = self.left_sector_clearance()         
         
-        #does it need to turn right?
-        elif self.clearance_left <1.0:
-            self.rotate('right')
+            #does it need to turn left?
+            if self.clearance_right < 1.0:  
+                self.rotate('left')
+            
+            #does it need to turn right?
+            elif self.clearance_left <1.0:
+                self.rotate('right')
 
-        else:  #free to move forward
-            self.motion.linear.x = 0.5   
-            self.motion.angular.z = 0
-            self.pub.publish(self.motion)
+            else:  #free to move forward
+                self.motion.linear.x = 0.5   
+                self.motion.angular.z = 0
+                self.pub.publish(self.motion)
 
 
     def rotate(self, direction):
@@ -144,18 +148,43 @@ class move_find_green:
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
         #Hsv limits
-        min_green = np.array([40,50,50])
-        max_green = np.array([60,255,255])
+        min_green = np.array([30,50,50])
+        max_green = np.array([70,255,255])
 
         #Create a black & white mask for green
         mask_g = cv2.inRange(hsv, min_green, max_green)
-
-        #We use the mask with the original image to get a colured post-processed image
+        cv2.imshow('Green Mask',mask_g)
+        #colured post-processed image
         res_g = cv2.bitwise_and(image,image, mask= mask_g)
-
         cv2.imshow('Green',res_g)
-        cv2.imshow('original', image)
+        #cv2.imshow('original', image)
+
+        #Detect any blobs in green iamge
+        # Set up the detector with default parameters.
+
+        detector = cv2.SimpleBlobDetector_create()
+        keypoints = detector.detect(mask_g)
+        print keypoints
+	    # Draw detected blobs as red circles.
+	    # cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS ensures the size of the circle corresponds to the size of blob
+        res_g_with_blobs = cv2.drawKeypoints(res_g, keypoints, np.array([]), (0,0,255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+        
+        # spray if blob (weed) found TODO move robot to spray in correct place
+        if keypoints:
+            #self.stopped = True                     #stop robot if keypoint (blob) found DEBUG
+            rospy.wait_for_service('/thorvald_001/spray')
+            try:
+                spray = rospy.ServiceProxy('/thorvald_001/spray', Empty)
+                spray()
+            except rospy.ServiceException as e:
+                print("Spray service call failed: %s"%e)
+
+
+        # Show blobs
+        cv2.imshow("Keypoints", res_g_with_blobs)
         cv2.waitKey(1)
+
+
 
 
 # Main Code
