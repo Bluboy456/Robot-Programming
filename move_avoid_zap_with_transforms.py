@@ -4,7 +4,7 @@ import rospy
 import math
 import tf
 import geometry_msgs.msg
-from geometry_msgs.msg import Twist, Point, Quaternion
+from geometry_msgs.msg import Twist
 from sensor_msgs.msg import LaserScan, Image
 from cv_bridge import CvBridge, CvBridgeError
 import cv2
@@ -20,33 +20,31 @@ class move_find_green:
     '''
 
     def __init__(self):
-        #initialisation
+        rate = rospy.Rate(3)
+        self.sub = rospy.Subscriber('/thorvald_001/scan', LaserScan, self.laser_callback)   #subscribe to laser to get distance messages to get distances
+        self.image_sub = rospy.Subscriber("/thorvald_001/kinect2_camera/hd/image_color_rect",Image,self.camera_callback)
+        self.pub = rospy.Publisher('/thorvald_001/twist_mux/cmd_vel', Twist, queue_size=1)  #publisher for speed and turn to robot
+        self.base_pub = rospy.Publisher('base_pose', geometry_msgs.msg.PoseStamped, queue_size=1)
+        self.scan_pub = rospy.Publisher('scan_pose', geometry_msgs.msg.PoseStamped, queue_size=1)
+        self.motion = Twist()
+        
+        #starting values
         self.direction = 'left'
         self.obstacle_x = 10.0      
         self.obstacle_y = 10.0
         self.angle_to_obstacle = 0.0
         self.distance_to_obstacle = 10.0
-        self.linear_speed = 0.5
-        self.angular_speed = 0.5
-        self.moving_to_spray = False
-        self.rate = rospy.Rate(3)
+        self.stopped = False
 
-        self.laser_sub = rospy.Subscriber('/thorvald_001/scan', LaserScan, self.laser_callback)   #subscribe to laser to get distance messages to get distances
-        self.image_sub = rospy.Subscriber("/thorvald_001/kinect2_camera/hd/image_color_rect",Image,self.camera_callback)
-        self.cmd_vel_pub = rospy.Publisher('/thorvald_001/twist_mux/cmd_vel', Twist, queue_size=1)  #publisher for speed and turn to robot
-        self.motion = Twist()
         self.bridge_object = CvBridge()
-        self.tf_listener = tf.TransformListener()
-        self.calculate_camera_sprayer_transform()
-       
-
-
-
+        
+        # get transform from laser scanner (hokuyo to base_link), only need to do it once as static
+        self.listener = tf.TransformListener()
 
         rospy.spin()
 
     def laser_callback (self, msg):      # called when a laser message arrives, extracts front, left and right distances
-        if self.moving_to_spray == False:  #check whether robot is in the process of spraying
+        if self.stopped == False:        #check stopped flag first before doing anything
             rospy.spin
             self.ranges = msg.ranges
             self.angle_increment = msg.angle_increment
@@ -62,19 +60,19 @@ class move_find_green:
                 self.rotate('right')
 
             else:  #free to move forward
-                self.motion.linear.x = self.linear_speed 
+                self.motion.linear.x = 0.5   
                 self.motion.angular.z = 0
-                self.cmd_vel_pub.publish(self.motion)
+                self.pub.publish(self.motion)
 
 
     def rotate(self, direction):
         self.motion.linear.x = 0.0
         if self.direction == 'right':
-            self.motion.angular.z = -1 * self.angular_speed   
+            self.motion.angular.z = -1 * 0.5   
         else:
             self.direction = 'left'
-            self.motion.angular.z = self.angular_speed  
-        self.cmd_vel_pub.publish(self.motion)    
+            self.motion.angular.z = 0.5   
+        self.pub.publish(self.motion)    
 
 
     # returns minium distance in right front 90deg sector and angle to that closest obstacle
@@ -101,17 +99,43 @@ class move_find_green:
                                                 # anticlockwise angle (to left) so positive in polar co-ords
         return self.min_distance, self.angle_to_closest
 
-    def calculate_camera_sprayer_transform(self):
-    # calculate offset from camera to sprayer so that sprayer can be moved over target
+    def calculate_transforms(self):
+    # calculate x, y co-ordinate of closest obstacle, realtive to scanner
+        #first work out whether closest obstacle is in left or right sectors
 
-        self.tf_listener.waitForTransform('thorvald_001/kinect2_rgb_optical_frame', 'thorvald_001/sprayer', rospy.Time.now(), rospy.Duration(4.0))
-        self.camera_to_sprayer = self.tf_listener.lookupTransform('thorvald_001/kinect2_rgb_optical_frame', 'thorvald_001/sprayer', rospy.Time())
-        self.x_move = self.camera_to_sprayer[0][0]
-        self.y_move = self.camera_to_sprayer[0][1]
+        if self.clearance_right < self.clearance_left: 
+            self.distance_to_obstacle = self.clearance_right
+            self.angle_to_obstacle = self.angle_right
+        else:
+            self.distance_to_obstacle = self.clearance_left
+            self.angle_to_obstacle = self.angle_left
+
+        # Convert polar to cartesian coordinates and publish as a pose
+        self.obstacle_x = self.distance_to_obstacle * math.cos(self.angle_to_obstacle)
+        self.obstacle_y = self.distance_to_obstacle * math.sin(self.angle_to_obstacle )   # negative to the right
+
+        self.p_scan = geometry_msgs.msg.PoseStamped()
+        self.p_scan.header.frame_id = "thorvald_001/hokuyo"
+        self.p_scan.pose.orientation.w = 1.0  # No rotation
+        self.p_scan.pose.position.x = self.obstacle_x
+        self.p_scan.pose.position.y = self.obstacle_y
+        self.scan_pub.publish(self.p_scan)   
+        
+        #calculate obstacle postion relative to base_link and publish as a pose 
+        self.laser_to_base = self.listener.lookupTransform('thorvald_001/hokuyo', 'thorvald_001/base_link', rospy.Time())
+        self.p_base = geometry_msgs.msg.PoseStamped()
+        self.p_base.header.frame_id = "thorvald_001/base_link"
+        self.p_base.pose.orientation.w = 1.0  # No rotation
+        self.p_base.pose.position.x = self.obstacle_x - self.laser_to_base[0][0]
+        self.p_base.pose.position.y = self.obstacle_y - self.laser_to_base[0][1]
+        self.base_pub.publish(self.p_base) 
 
     def camera_callback(self,data):
         try:
+            # We select bgr8 because its the OpenCV encoding by default
             image = self.bridge_object.imgmsg_to_cv2(data, desired_encoding="bgr8")
+            #example_path = '/home/user/catkin_ws/src/opencv_for_robotics_images/Unit_2/Course_images/Filtering.png'
+            #image = cv2.imread(example_path)
            
         except CvBridgeError as e:
             print(e)
@@ -132,7 +156,7 @@ class move_find_green:
         cv2.imshow('Green Mask',mask_g)
         #colured post-processed image
         res_g = cv2.bitwise_and(image,image, mask= mask_g)
-        #cv2.imshow('Green',res_g)
+        cv2.imshow('Green',res_g)
         #cv2.imshow('original', image)
 
         #Detect any blobs in green iamge
@@ -140,84 +164,28 @@ class move_find_green:
 
         detector = cv2.SimpleBlobDetector_create()
         keypoints = detector.detect(mask_g)
-        # print keypoints #DEBUG
+        print keypoints
 	    # Draw detected blobs as red circles.
 	    # cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS ensures the size of the circle corresponds to the size of blob
         res_g_with_blobs = cv2.drawKeypoints(res_g, keypoints, np.array([]), (0,0,255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
         
         # spray if blob (weed) found TODO move robot to spray in correct place
         if keypoints:
-            self.move_over_spray()
-
-        # Show blobs
-        #cv2.imshow("Keypoints", res_g_with_blobs)
-        cv2.waitKey(1)
-
-    def get_odom(self):
-        # Get the current transform between the odom and base frames
-        try:
-            self.tf_listener.waitForTransform('thorvald_001/odom', 'thorvald_001/base_link', rospy.Time.now(), rospy.Duration(4.0))
-            (trans, rot)  = self.tf_listener.lookupTransform('thorvald_001/odom', 'thorvald_001/base_link', rospy.Time())
-        except (tf.Exception, tf.ConnectivityException, tf.LookupException):
-            rospy.loginfo("TF Exception")
-            return
-        return (Point(*trans))   
-
-    def robot_move(self, x, y):
-        position = Point()
-        move_cmd = Twist()
-        goal_distance_x = x 
-        goal_distance_y = y 
-        print ('goal_distance_x:')#DEBUG
-        print  goal_distance_x  #DEBUG
-        # Set the movement command to forward motion
-        move_cmd.linear.x = self.linear_speed
-        move_cmd.linear.y = self.linear_speed    
-
-        # Get the starting position values     
-        position = self.get_odom()
-                        
-        x_start = position.x
-        y_start = position.y
- 
-        # Keep track of the distance traveled
-
-        # move in x direction
-        distance = 0
-        move_cmd.linear.x = self.linear_speed
-        move_cmd.linear.y = 0  
-        while distance < goal_distance_x:
-            self.cmd_vel_pub.publish(move_cmd)
-            self.rate.sleep()
-            # Get the new position
-            position = self.get_odom()
-            distance = math.fabs(position.x - x_start)
-            print ('x distance:' + str(distance))
-
-        # move in y direction
-        distance = 0
-        move_cmd.linear.x = 0
-        move_cmd.linear.y = self.linear_speed 
-        while distance < goal_distance_y:
-            self.cmd_vel_pub.publish(move_cmd)
-            self.rate.sleep()
-            position = self.get_odom()
-            distance = math.fabs(position.y - y_start)
-            print ('y distance:' + str(distance))
-        return
-
-
-    def move_over_spray(self):
-            self.moving_to_spray = True   #stop normal moving while spraying
-            print 'spray called'
-            self.robot_move(self.x_move, self.y_move)
+            #self.stopped = True                     #stop robot if keypoint (blob) found DEBUG
             rospy.wait_for_service('/thorvald_001/spray')
             try:
                 spray = rospy.ServiceProxy('/thorvald_001/spray', Empty)
                 spray()
-                self.moving_to_spray = False   #spraying complete, normal movement can resume
             except rospy.ServiceException as e:
                 print("Spray service call failed: %s"%e)
+
+
+        # Show blobs
+        cv2.imshow("Keypoints", res_g_with_blobs)
+        cv2.waitKey(1)
+
+
+
 
 # Main Code
 if __name__ == '__main__':
