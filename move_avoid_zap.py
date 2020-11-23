@@ -28,8 +28,9 @@ class move_find_green:
         self.distance_to_obstacle = 10.0
         self.linear_speed = 0.5
         self.angular_speed = 0.5
-        self.moving_to_spray = False
+        self.obstacle_present = False
         self.rate = rospy.Rate(3)
+        self.movement_paused = False
 
         self.laser_sub = rospy.Subscriber('/thorvald_001/scan', LaserScan, self.laser_callback)   #subscribe to laser to get distance messages to get distances
         self.image_sub = rospy.Subscriber("/thorvald_001/kinect2_camera/hd/image_color_rect",Image,self.camera_callback)
@@ -46,25 +47,32 @@ class move_find_green:
         rospy.spin()
 
     def laser_callback (self, msg):      # called when a laser message arrives, extracts front, left and right distances
-        if self.moving_to_spray == False:  #check whether robot is in the process of spraying
-            rospy.spin
-            self.ranges = msg.ranges
-            self.angle_increment = msg.angle_increment
-            self.clearance_right, self.angle_right = self.right_sector_clearance()
-            self.clearance_left, self.angle_left = self.left_sector_clearance()         
-        
-            #does it need to turn left?
-            if self.clearance_right < 1.0:  
-                self.rotate('left')
-            
-            #does it need to turn right?
-            elif self.clearance_left <1.0:
-                self.rotate('right')
 
-            else:  #free to move forward
-                self.motion.linear.x = self.linear_speed 
-                self.motion.angular.z = 0
-                self.cmd_vel_pub.publish(self.motion)
+        if self.movement_paused:
+            return                      #don't move if pause in progress
+        rospy.spin
+        self.ranges = msg.ranges
+        self.angle_increment = msg.angle_increment
+        self.clearance_right, self.angle_right = self.right_sector_clearance()
+        self.clearance_left, self.angle_left = self.left_sector_clearance()         
+        
+        if (self.clearance_right < 1.0 or self.clearance_left <1.0): 
+            self.obstacle_present = True   #Flag used by move_to_spray method to abort if obstacle in the way
+        else:
+            self.obstacle_present = False
+
+        #does it need to turn left?
+        if self.clearance_right < 1.0:  
+            self.rotate('left')
+        
+        #does it need to turn right?
+        elif self.clearance_left <1.0:
+            self.rotate('right')
+
+        else:  #free to move forward
+            self.motion.linear.x = self.linear_speed 
+            self.motion.angular.z = 0
+            self.cmd_vel_pub.publish(self.motion)
 
 
     def rotate(self, direction):
@@ -147,7 +155,7 @@ class move_find_green:
         
         # spray if blob (weed) found TODO move robot to spray in correct place
         if keypoints:
-            self.move_over_spray()
+            self.move_over_and_spray()
 
         # Show blobs
         #cv2.imshow("Keypoints", res_g_with_blobs)
@@ -163,13 +171,16 @@ class move_find_green:
             return
         return (Point(*trans))   
 
-    def robot_move(self, x, y):
+    def move_to_spray(self, x, y):
+        self.pause_movement(1)  #DEBUG
         position = Point()
         move_cmd = Twist()
         goal_distance_x = x 
         goal_distance_y = y 
         print ('goal_distance_x:')#DEBUG
         print  goal_distance_x  #DEBUG
+        print ('goal_distance_y:')#DEBUG
+        print  goal_distance_y  #DEBUG
         # Set the movement command to forward motion
         move_cmd.linear.x = self.linear_speed
         move_cmd.linear.y = self.linear_speed    
@@ -179,47 +190,64 @@ class move_find_green:
                         
         x_start = position.x
         y_start = position.y
- 
-        # Keep track of the distance traveled
 
-        # move in x direction
-        distance = 0
+        distance_x = 0
+        distance_y = 0
         move_cmd.linear.x = self.linear_speed
-        move_cmd.linear.y = 0  
-        while distance < goal_distance_x:
+        move_cmd.linear.y = self.linear_speed  
+        #move in x_direction
+        position = self.get_odom()                
+        x_start = position.x
+        while distance_x < goal_distance_x :
+            if self.obstacle_present:   #Abort motion if obstacle present and return False to prevent spray
+                print 'spray move aborted'
+                return False
             self.cmd_vel_pub.publish(move_cmd)
             self.rate.sleep()
             # Get the new position
             position = self.get_odom()
-            distance = math.fabs(position.x - x_start)
-            print ('x distance:' + str(distance))
+            distance_x = math.fabs(position.x - x_start)
 
-        # move in y direction
-        distance = 0
-        move_cmd.linear.x = 0
-        move_cmd.linear.y = self.linear_speed 
-        while distance < goal_distance_y:
+            print ('x distance:' + str(distance_x))       #DEBUG
+        
+        #move in y_direction
+        position = self.get_odom()                
+        y_start = position.y
+        while distance_y < goal_distance_y :
+            if self.obstacle_present:   #Abort motion if obstacle present and return False to prevent spray
+                print 'spray move aborted'
+                return False
             self.cmd_vel_pub.publish(move_cmd)
             self.rate.sleep()
+            # Get the new position
             position = self.get_odom()
-            distance = math.fabs(position.y - y_start)
-            print ('y distance:' + str(distance))
-        return
+            distance_y = math.fabs(position.y - y_start)
 
 
-    def move_over_spray(self):
-            self.moving_to_spray = True   #stop normal moving while spraying
-            print 'spray called'
-            self.robot_move(self.x_move, self.y_move)
+            print ('y distance:' + str(distance_y))  #DEBUG
+
+        return True
+    def move_over_and_spray(self):
+        #If move to correct spray position was successful, then spray
+        if self.move_to_spray(self.x_move, self.y_move):   
+            self.pause_movement(1)  #DEBUG
             rospy.wait_for_service('/thorvald_001/spray')
             try:
                 spray = rospy.ServiceProxy('/thorvald_001/spray', Empty)
                 spray()
-                self.moving_to_spray = False   #spraying complete, normal movement can resume
             except rospy.ServiceException as e:
                 print("Spray service call failed: %s"%e)
 
-# Main Code
+    def pause_movement(self, pause_time):  #TODO ?pause routine not working
+        self.movement_paused = True     #set flag to stop laser callback moving robot
+        move_cmd = Twist()
+        move_cmd.linear.x = 0
+        move_cmd.linear.y = 0
+        self.cmd_vel_pub.publish(move_cmd)
+        rospy.sleep(pause_time)
+        self.movement_paused = False     #pause is over        
+
+# Main Codes
 if __name__ == '__main__':
     rospy.init_node('move_avoid', anonymous=True)
     try:

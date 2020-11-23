@@ -22,8 +22,10 @@ catkin_create_pkg my_package_namerospy
 always source bash when in new terminal by: 
 source devel/setup.bash  (now in setup.bash)
 
-# to run thorvald:
-roslaunch uol_cmp9767m_base thorvald-sim.launch fake_localisation:=true
+# to run thorvald in gazebo:
+roslaunch uol_cmp9767m_base thorvald-sim.launch fake_localisation:=true  
+to kill Gazebo after crash:  
+killall -9 gzserver  
 
 # to run rviz
 rviz -d `rospack find uol_cmp9767m_base`/rviz/two_robots.rviz
@@ -35,5 +37,8 @@ git add .
 git commit  
 Type commit message, ctrl o ctrl x to save and exit  
 git push Bluboy456  smxxxxxxxx8  
+
+
+
   
 NB two spaces for newline in this markdown!  
