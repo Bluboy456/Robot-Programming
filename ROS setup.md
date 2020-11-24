@@ -28,7 +28,19 @@ to kill Gazebo after crash:
 killall -9 gzserver  
 
 # to run rviz
-rviz -d `rospack find uol_cmp9767m_base`/rviz/two_robots.rviz
+with a .rviz config file.  Can also load and saveconfig from within rviz  
+rviz -d `rospack find uol_cmp9767m_base`/rviz/two_robots.rviz  
+
+To add robot model  
+add by display type, robot model  
+change description to /thorvald_001/robot_description  
+
+Dont forget that add bt topic has a lot of options:  
+E.g.  particecloud, amcl_pose and scan to see localaization (select fixed frame to map)  
+E.g. odometry/base_raw and odometry/filtered to effect of Kalman filer (select fixed frame to odom)
+
+
+
 
 # git commands
 Code should be in ~/catkin_ws/src/my_examples/src/scripts/Robot-Programming  
@@ -38,7 +50,10 @@ git commit
 Type commit message, ctrl o ctrl x to save and exit  
 git push Bluboy456  smxxxxxxxx8  
 
-
+# robot steering 
+rosrun rqt_robot_steering rqt_robot_steering  
+set topic to /thorvald_001/teleop_joy/cmd_vel  
+(can ignore warning message)  
 
   
 NB two spaces for newline in this markdown!  
