@@ -1,8 +1,9 @@
 #! /usr/bin/env python
-
+from __future__ import division   # force / operator to return float instead of int
 import rospy
 import math
 import tf
+import time
 import geometry_msgs.msg
 from geometry_msgs.msg import Twist, Point, Quaternion
 from sensor_msgs.msg import LaserScan, Image
@@ -20,19 +21,22 @@ class move_find_green:
     '''
 
     def __init__(self):
-        #initialisation
+        #mapping parameters
         self.direction = 'left'
         self.obstacle_x = 10.0      
         self.obstacle_y = 10.0
         self.angle_to_obstacle = 0.0
         self.distance_to_obstacle = 10.0
-        self.linear_speed = 0.5
-        self.angular_speed = 0.5
+        self.linear_speed = 0.7
+        self.angular_speed = 0.7
         self.obstacle_present = False
-        self.rate = rospy.Rate(3)
-        self.movement_paused = False
 
-        self.laser_sub = rospy.Subscriber('/thorvald_001/scan', LaserScan, self.laser_callback)   #subscribe to laser to get distance messages to get distances
+        
+        #state flags
+        self.movement_paused = False
+        self.mapping = True
+
+        self.laser_sub = rospy.Subscriber('/thorvald_001/scan', LaserScan, self.laser_callback_mapping)   #subscribe to laser to get distance messages to get distances
         self.image_sub = rospy.Subscriber("/thorvald_001/kinect2_camera/hd/image_color_rect",Image,self.camera_callback)
         self.cmd_vel_pub = rospy.Publisher('/thorvald_001/twist_mux/cmd_vel', Twist, queue_size=1)  #publisher for speed and turn to robot
         self.motion = Twist()
@@ -40,14 +44,16 @@ class move_find_green:
         self.tf_listener = tf.TransformListener()
         self.calculate_camera_sprayer_transform()
        
-
+        self.rate = rospy.Rate(3)
 
 
 
         rospy.spin()
 
-    def laser_callback (self, msg):      # called when a laser message arrives, extracts front, left and right distances
-
+    def laser_callback_mapping (self, msg):     # called when a laser message arrives,moves randomly and avoids
+                                        #obstacles, used for initial mapping
+        if not(self.mapping):
+            return                      # only run this callback when in mapping state. 
         if self.movement_paused:
             return                      #don't move if pause in progress
         rospy.spin
@@ -71,7 +77,16 @@ class move_find_green:
 
         else:  #free to move forward
             self.motion.linear.x = self.linear_speed 
-            self.motion.angular.z = 0
+            # introduce a turn sometimes to give a random element to motion
+            # dont use random function as that will average to zero over callbacks
+            time_in_secs_mod_ten = int(round(time.time())) % 10
+            angular_vel = 0.0
+            if (time_in_secs_mod_ten < 5):
+                angular_vel = (time_in_secs_mod_ten-2)/10.0
+            print 'random angular velocity: ' + str (angular_vel)  #DEBUG
+
+
+            self.motion.angular.z = angular_vel
             self.cmd_vel_pub.publish(self.motion)
 
 
@@ -89,11 +104,10 @@ class move_find_green:
     def right_sector_clearance(self):
         self.min_distance = 10.0
         self.angle_to_closest = 0.0
-        #for index in range(len(self.ranges)/2-1,0):
-        for index in range(0,len(self.ranges)/2-1):
+        for index in range(0,len(self.ranges)//2-1):
             if self.min_distance > self.ranges[index]:  
                 self.min_distance = self.ranges[index]    #found a new minium distance
-                self.angle_to_closest = -1*((len(self.ranges)/2-1) - index ) * self.angle_increment  # convert to radians  
+                self.angle_to_closest = -1*((len(self.ranges)//2-1) - index ) * self.angle_increment  # convert to radians  
                                                 # angle of zero must be straight ahead 
                                                 # clockwise angle (to right) so negative in polar co-ords
         return self.min_distance, self.angle_to_closest
@@ -102,7 +116,7 @@ class move_find_green:
     def left_sector_clearance(self):
         self.min_distance = 10.0  
         self.angle_to_closest = 0.0
-        for index in range(len(self.ranges)/2,len(self.ranges)-1):
+        for index in range(len(self.ranges)//2,len(self.ranges)-1):
             if self.min_distance > self.ranges[index]:  
                 self.min_distance = self.ranges[index]  #found a new minium distance
                 self.angle_to_closest = index * self.angle_increment  # convert to radians
@@ -118,6 +132,8 @@ class move_find_green:
         self.y_move = self.camera_to_sprayer[0][1]
 
     def camera_callback(self,data):
+        if self.mapping:
+            return                  #dont need to process camera image or spray when in mapping state
         try:
             image = self.bridge_object.imgmsg_to_cv2(data, desired_encoding="bgr8")
            
