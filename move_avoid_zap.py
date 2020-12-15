@@ -13,24 +13,191 @@ import numpy as np
 from uol_cmp9767m_tutorial.srv import *
 from std_srvs.srv import Empty
 
+class mapping():
 
+    # Move robot around, avoiding obstacles while map server running
+    # Creates occupancy map in an array
+    # move foward but turn  if within 1m of an obstacle
+
+
+    def __init__(self):
+        self.motion = Twist()
+        self.direction = 'left'
+        self.obstacle_x = 10.0          #all distances in metres
+        self.obstacle_y = 10.0
+        self.angle_to_obstacle = 0.0
+        self.distance_to_obstacle = 10.0
+        self.linear_speed = 0.7         #metres per second
+        self.angular_speed = 0.7        #radians per second
+        self.mapping_start_time = time.time()
+        self.mapping_complete = False   #flag that can be interpreted to find out whether mapping is complete
+        self.mapping_duration = 10      #duration of mapping stage in seconds
+        self.rate = rospy.Rate(3) 
+
+
+
+        
+        
+    def map (self):              #method to start mapping
+        self.laser_sub = rospy.Subscriber('/thorvald_001/scan', LaserScan, self.laser_callback_mapping)   #subscribe to laser to get distance messages to get distances
+        self.cmd_vel_pub = rospy.Publisher('/thorvald_001/twist_mux/cmd_vel', Twist, queue_size=1)  #publisher for speed and turn to robot
+        self.motion = Twist()
+    
+
+    def laser_callback_mapping (self, msg):     # called when a laser message arrives,moves randomly and avoids
+                                                #obstacles, used for initial mapping
+    
+
+        # check whether mapping time is over
+        if (time.time() - self.mapping_start_time) > self.mapping_duration: 
+            rospy.signal_shutdown('mapping over')
+            print'time up' #DEBUG
+            return
+
+        self.ranges = msg.ranges
+        self.angle_increment = msg.angle_increment
+        self.clearance_right, self.angle_right = self.right_sector_clearance()
+        self.clearance_left, self.angle_left = self.left_sector_clearance()         
+        
+        #does it need to turn left?
+        if self.clearance_right < 1.0:  
+            self.rotate('left')
+        
+        #does it need to turn right?
+        elif self.clearance_left <1.0:
+            self.rotate('right')
+
+        else:  #free to move forward
+            self.motion.linear.x = self.linear_speed 
+            # introduce a turn sometimes to give a random element to motion
+            # dont use random function as that will average to zero over callbacks
+            time_in_secs_mod_ten = int(round(time.time())) % 10
+            angular_vel = 0.0
+            if (time_in_secs_mod_ten < 5):
+                angular_vel = (time_in_secs_mod_ten-2)/10.0
+            print 'random angular velocity: ' + str (angular_vel)  #DEBUG
+
+
+            self.motion.angular.z = angular_vel
+            self.cmd_vel_pub.publish(self.motion)
+
+
+    def rotate(self, direction):
+        self.motion.linear.x = 0.0
+        if self.direction == 'right':
+            self.motion.angular.z = -1 * self.angular_speed   
+        else:
+            self.direction = 'left'
+            self.motion.angular.z = self.angular_speed  
+        self.cmd_vel_pub.publish(self.motion)    
+
+
+    # returns minium distance in right front 90deg sector and angle to that closest obstacle
+    def right_sector_clearance(self):
+        self.min_distance = 10.0
+        self.angle_to_closest = 0.0
+        for index in range(0,len(self.ranges)//2-1):
+            if self.min_distance > self.ranges[index]:  
+                self.min_distance = self.ranges[index]    #found a new minium distance
+                self.angle_to_closest = -1*((len(self.ranges)//2-1) - index ) * self.angle_increment  # convert to radians  
+                                                # angle of zero must be straight ahead 
+                                                # clockwise angle (to right) so negative in polar co-ords
+        return self.min_distance, self.angle_to_closest
+
+# returns minium distance in left front 90deg sector and angle to that closest obstacle
+    def left_sector_clearance(self):
+        self.min_distance = 10.0  
+        self.angle_to_closest = 0.0
+        for index in range(len(self.ranges)//2,len(self.ranges)-1):
+            if self.min_distance > self.ranges[index]:  
+                self.min_distance = self.ranges[index]  #found a new minium distance
+                self.angle_to_closest = index * self.angle_increment  # convert to radians
+                                                # anticlockwise angle (to left) so positive in polar co-ords
+        return self.min_distance, self.angle_to_closest
+
+
+
+    
+    def get_odom(self):
+        # Get the current transform between the odom and base frames
+        try:
+            self.tf_listener.waitForTransform('thorvald_001/odom', 'thorvald_001/base_link', rospy.Time.now(), rospy.Duration(4.0))
+            (trans, rot)  = self.tf_listener.lookupTransform('thorvald_001/odom', 'thorvald_001/base_link', rospy.Time())
+        except (tf.Exception, tf.ConnectivityException, tf.LookupException):
+            rospy.loginfo("TF Exception")
+            return
+        return (Point(*trans))   
+
+    def move_to_spray(self, x, y):
+        self.pause_movement(1)  #DEBUG
+        position = Point()
+        move_cmd = Twist()
+        goal_distance_x = x 
+        goal_distance_y = y 
+        print ('goal_distance_x:')#DEBUG
+        print  goal_distance_x  #DEBUG
+        print ('goal_distance_y:')#DEBUG
+        print  goal_distance_y  #DEBUG
+        # Set the movement command to forward motion
+        move_cmd.linear.x = self.linear_speed
+        move_cmd.linear.y = self.linear_speed    
+
+        # Get the starting position values     
+        position = self.get_odom()
+                        
+        x_start = position.x
+        y_start = position.y
+
+        distance_x = 0
+        distance_y = 0
+        move_cmd.linear.x = self.linear_speed
+        move_cmd.linear.y = self.linear_speed  
+        #move in x_direction
+        position = self.get_odom()                
+        x_start = position.x
+        while distance_x < goal_distance_x :
+            if self.obstacle_present:   #Abort motion if obstacle present and return False to prevent spray
+                print 'spray move aborted'
+                return False
+            self.cmd_vel_pub.publish(move_cmd)
+            self.rate.sleep()
+            # Get the new position
+            position = self.get_odom()
+            distance_x = math.fabs(position.x - x_start)
+
+            print ('x distance:' + str(distance_x))       #DEBUG
+        
+        #move in y_direction
+        position = self.get_odom()                
+        y_start = position.y
+        while distance_y < goal_distance_y :
+            if self.obstacle_present:   #Abort motion if obstacle present and return False to prevent spray
+                print 'spray move aborted'
+                return False
+            self.cmd_vel_pub.publish(move_cmd)
+            self.rate.sleep()
+            # Get the new position
+            position = self.get_odom()
+            distance_y = math.fabs(position.y - y_start)
+
+
+            print ('y distance:' + str(distance_y))  #DEBUG
+
+        return True
+    
+
+'''   DEBUG Commented out while refactoring mapping class
 class move_find_green:
 
-    '''
-    move foward but turn  if within 1m of an obstacle
-    '''
+
+    # move foward but turn  if within 1m of an obstacle
+
 
     def __init__(self):
         #mapping parameters
         self.direction = 'left'
         self.obstacle_x = 10.0      
-        self.obstacle_y = 10.0
-        self.angle_to_obstacle = 0.0
-        self.distance_to_obstacle = 10.0
-        self.linear_speed = 0.7
-        self.angular_speed = 0.7
-        self.obstacle_present = False
-
+        self.obstacle_y = 10.0   
         
         #state flags
         self.movement_paused = False
@@ -262,18 +429,21 @@ class move_find_green:
         self.cmd_vel_pub.publish(move_cmd)
         rospy.sleep(pause_time)
         self.movement_paused = False     #pause is over        
-
-# Main Codes
+'''
+# Main Code
 if __name__ == '__main__':
     rospy.init_node('move_avoid', anonymous=True)
     try:
-       move_find_green()
-       rospy.spin
+       m = mapping()
+       m.map()
+       rospy.spin()
     except rospy.ROSInterruptException:
         rospy.logwarn("interrupted")
         pass
-
-  
+    #while m.mapping_complete == False:
+        # wait for mapping phase to complete
+    #print 'from main: mapping in progress'
+    print 'from main: mapping over'
 
    
 
