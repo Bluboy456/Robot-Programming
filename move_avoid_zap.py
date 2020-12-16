@@ -5,6 +5,7 @@ import math
 import tf
 import time
 import geometry_msgs.msg
+from nav_msgs.msg import OccupancyGrid, MapMetaData
 from geometry_msgs.msg import Twist, Point, Quaternion
 from sensor_msgs.msg import LaserScan, Image
 from cv_bridge import CvBridge, CvBridgeError
@@ -17,7 +18,7 @@ class mapping():
 
     # Move robot around, avoiding obstacles while map server running
     # Creates occupancy map in an array
-    # move foward but turn  if within 1m of an obstacle
+    # move foward but turn  if within 1m of san obstacle
 
 
     def __init__(self):
@@ -31,7 +32,8 @@ class mapping():
         self.angular_speed = 0.7        #radians per second
         self.mapping_start_time = time.time()
         self.mapping_complete = False   #flag that can be interpreted to find out whether mapping is complete
-        self.mapping_duration = 10      #duration of mapping stage in seconds
+        self.mapping_duration = 2      #duration of mapping stage in seconds
+        self.occupancy_grid = []
         self.rate = rospy.Rate(3) 
 
 
@@ -42,16 +44,16 @@ class mapping():
         self.laser_sub = rospy.Subscriber('/thorvald_001/scan', LaserScan, self.laser_callback_mapping)   #subscribe to laser to get distance messages to get distances
         self.cmd_vel_pub = rospy.Publisher('/thorvald_001/twist_mux/cmd_vel', Twist, queue_size=1)  #publisher for speed and turn to robot
         self.motion = Twist()
-    
 
     def laser_callback_mapping (self, msg):     # called when a laser message arrives,moves randomly and avoids
                                                 #obstacles, used for initial mapping
     
-
         # check whether mapping time is over
         if (time.time() - self.mapping_start_time) > self.mapping_duration: 
+            self.occupancy_grid = rospy.wait_for_message('/map',OccupancyGrid )
+            #print self.occupancy_grid #DEBUG
+            #print'time up' #DEBUG
             rospy.signal_shutdown('mapping over')
-            print'time up' #DEBUG
             return
 
         self.ranges = msg.ranges
@@ -71,6 +73,7 @@ class mapping():
             self.motion.linear.x = self.linear_speed 
             # introduce a turn sometimes to give a random element to motion
             # dont use random function as that will average to zero over callbacks
+            time_in_secs_mod_ten = 0     #just to avoid undeclared variable syntax warning
             time_in_secs_mod_ten = int(round(time.time())) % 10
             angular_vel = 0.0
             if (time_in_secs_mod_ten < 5):
@@ -128,62 +131,7 @@ class mapping():
             return
         return (Point(*trans))   
 
-    def move_to_spray(self, x, y):
-        self.pause_movement(1)  #DEBUG
-        position = Point()
-        move_cmd = Twist()
-        goal_distance_x = x 
-        goal_distance_y = y 
-        print ('goal_distance_x:')#DEBUG
-        print  goal_distance_x  #DEBUG
-        print ('goal_distance_y:')#DEBUG
-        print  goal_distance_y  #DEBUG
-        # Set the movement command to forward motion
-        move_cmd.linear.x = self.linear_speed
-        move_cmd.linear.y = self.linear_speed    
-
-        # Get the starting position values     
-        position = self.get_odom()
-                        
-        x_start = position.x
-        y_start = position.y
-
-        distance_x = 0
-        distance_y = 0
-        move_cmd.linear.x = self.linear_speed
-        move_cmd.linear.y = self.linear_speed  
-        #move in x_direction
-        position = self.get_odom()                
-        x_start = position.x
-        while distance_x < goal_distance_x :
-            if self.obstacle_present:   #Abort motion if obstacle present and return False to prevent spray
-                print 'spray move aborted'
-                return False
-            self.cmd_vel_pub.publish(move_cmd)
-            self.rate.sleep()
-            # Get the new position
-            position = self.get_odom()
-            distance_x = math.fabs(position.x - x_start)
-
-            print ('x distance:' + str(distance_x))       #DEBUG
-        
-        #move in y_direction
-        position = self.get_odom()                
-        y_start = position.y
-        while distance_y < goal_distance_y :
-            if self.obstacle_present:   #Abort motion if obstacle present and return False to prevent spray
-                print 'spray move aborted'
-                return False
-            self.cmd_vel_pub.publish(move_cmd)
-            self.rate.sleep()
-            # Get the new position
-            position = self.get_odom()
-            distance_y = math.fabs(position.y - y_start)
-
-
-            print ('y distance:' + str(distance_y))  #DEBUG
-
-        return True
+    
     
 
 '''   DEBUG Commented out while refactoring mapping class
@@ -432,11 +380,12 @@ class move_find_green:
 '''
 # Main Code
 if __name__ == '__main__':
-    rospy.init_node('move_avoid', anonymous=True)
+    rospy.init_node('mapping', anonymous=True)
     try:
-       m = mapping()
-       m.map()
-       rospy.spin()
+        m = mapping()
+        m.map()
+        print m.occupancy_grid
+        rospy.spin()
     except rospy.ROSInterruptException:
         rospy.logwarn("interrupted")
         pass
@@ -444,6 +393,7 @@ if __name__ == '__main__':
         # wait for mapping phase to complete
     #print 'from main: mapping in progress'
     print 'from main: mapping over'
+
 
    
 
