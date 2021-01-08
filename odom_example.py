@@ -91,14 +91,15 @@ class OutAndBack():
             (position, rotation) = self.get_odom()
                         
             x_start = position.x
+
             y_start = position.y
             
             # Keep track of the distance traveled
             distance = 0
             
-            # Enter the loop to move along a side
+            # move in x direction
             while distance < goal_distance and not rospy.is_shutdown():
-                # Publish the Twist message and sleep 1 cycle         
+      
                 self.cmd_vel.publish(move_cmd)
                 
                 r.sleep()

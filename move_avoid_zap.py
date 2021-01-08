@@ -26,16 +26,20 @@ class mapping():
     def __init__(self):
         self.motion = Twist()
         self.direction = 'left'
-        self.obstacle_x = 10.0          #all distances in metres
+        
+        #all distances in metres, just default starting values
+        self.obstacle_x = 10.0          
         self.obstacle_y = 10.0
         self.angle_to_obstacle = 0.0
         self.distance_to_obstacle = 10.0
-        self.linear_speed = 0.7         #metres per second
-        self.angular_speed = 0.7        #radians per second
+
+        self.clearance_from_obstacle = 2.5  #robot turns at this distance when mapping (metres)
+
+        self.linear_speed = 0.7         #robot speed when mapping, metres per second
+        self.angular_speed = 0.7        #robot rotation rate when mapping,radians per second
         self.mapping_start_time = time.time()
         self.mapping_complete = False   #flag that can be interpreted to find out whether mapping is complete
         self.mapping_duration = 120      #duration of mapping stage in seconds
-        self.mapping_complete = False
         self.rate = rospy.Rate(3)
 
 
@@ -62,11 +66,11 @@ class mapping():
         self.clearance_left, self.angle_left = self.left_sector_clearance()         
         
         #does it need to turn left?
-        if self.clearance_right < 1.0:  
+        if self.clearance_right < self.clearance_from_obstacle :  
             self.rotate('left')
         
         #does it need to turn right?
-        elif self.clearance_left <1.0:
+        elif self.clearance_left <self.clearance_from_obstacle :
             self.rotate('right')
 
         else:  #free to move forward
@@ -100,7 +104,7 @@ class mapping():
 
     # returns minium distance in right front 90deg sector and angle to that closest obstacle
     def right_sector_clearance(self):
-        self.min_distance = 10.0
+        self.min_distance = 10.0  #default starting values
         self.angle_to_closest = 0.0
         for index in range(0,len(self.ranges)//2-1):
             if self.min_distance > self.ranges[index]:  
@@ -112,7 +116,7 @@ class mapping():
 
 # returns minium distance in left front 90deg sector and angle to that closest obstacle
     def left_sector_clearance(self):
-        self.min_distance = 10.0  
+        self.min_distance = 10.0  #default starting values
         self.angle_to_closest = 0.0
         for index in range(len(self.ranges)//2,len(self.ranges)-1):
             if self.min_distance > self.ranges[index]:  
@@ -177,15 +181,14 @@ class weeding:
         self.traverse_up = False      #going downwards
         self.spraying_enabled = False #don't spray until traversing started
 
-
         # move to cell (0,0), ie the'bottom left' corner, allowing for margins
         self.next_x = self.grid_origin_x + self.margin
         self.next_y = self.grid_origin_y + self.margin  
         '''
         #DEBUG use this alternative code to move straight to centre so seeing weeds quickly for debug
-        self.next_x = self.grid_origin_x + self.margin + (self.grid_width -2*self.margin)/2    
-        self.next_y = self.grid_origin_y + self.margin + (self.grid_height-2*self.margin)/2  
-        '''
+        self.next_x = self.grid_origin_x + self.margin + (self.grid_width -2*self.margin)*0.5    
+        self.next_y = self.grid_origin_y + self.margin + (self.grid_height-2*self.margin)*0.5 
+       '''
         #print 'next_y: ' + str(self.next_y) #DEBUG
         self.move_to_goal (self.next_x, self.next_y)
         #print 'reached starting position' #DEBUG
@@ -194,7 +197,7 @@ class weeding:
 
         
         while True:                   
-        # make a traverse up 
+        # make a traverse up (+ve x direction)
             self.traverse_up = True
             self.spraying_enabled = True
             self.next_x = self.current_x + (self.grid_width - 2 * self.margin)
@@ -215,7 +218,7 @@ class weeding:
             self.current_y = self.next_y
             self.move_to_goal (self.next_x, self.next_y)
 
-        # traverse  back 
+        # traverse  back (-ve x direction)
             self.traverse_up = False
             self.spraying_enabled = True
             self.next_x = self.current_x - (self.grid_width - 2 * self.margin)
@@ -234,7 +237,8 @@ class weeding:
             self.move_to_goal (self.next_x, self.next_y )
             self.current_x = self.next_x
             self.current_y = self.next_y
-            self.move_to_goal (self.next_x, self.next_y)
+
+
     
 
     # The following function is adapted from move_base action_client example at 
@@ -246,14 +250,23 @@ class weeding:
         goal.target_pose.header.stamp = rospy.Time.now()
         goal.target_pose.pose.position.x = x_goal
         goal.target_pose.pose.position.y = y_goal
-        goal.target_pose.pose.orientation.w = 1.0
+
+        #rotate 90 deg in appropriate sense, to be ready to head off in correct direction 
+        goal.target_pose.pose.orientation.z = 0.7071
+        if self.traverse_up == True:
+            goal.target_pose.pose.orientation.w = 0.7071       
+        else:
+            goal.target_pose.pose.orientation.w = -0.7071
+        
         self.move_base_client.send_goal(goal)
         wait = self.move_base_client.wait_for_result()
         if not wait:
             rospy.logerr("Action server not available!")
             rospy.signal_shutdown("Action server not available!")
         else:
-            return self.move_base_client.get_result()
+            result = self.move_to_goal (self.next_x, self.next_y)
+            print "move_base result:" + str(result)
+            return result
 
     def update_pose(self,msg):
             self.pose_x = msg.point.x
@@ -386,13 +399,13 @@ if __name__ == '__main__':
     # CREATE MAP
     rospy.init_node('mapping', anonymous=True)
     try:
-        '''
+        
         m = mapping()
         m.map()
         #wait while mapping phase takes place
         while not(m.mapping_complete):
-            time.sleep(1)
-        '''
+            time.sleep(1)      #Just check periodically to reduce computational load
+        
         # TRAVERSE FIELD, ID WEEDS AND SPRAY
         #rospy.init_node('weeding', anonymous=True)
         w = weeding()     

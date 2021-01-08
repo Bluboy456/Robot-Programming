@@ -1,3 +1,23 @@
+
+# TO RUN PROGRAM
+
+# 1) Launch Gazebo:
+roslaunch uol_cmp9767m_base thorvald-sim.launch obstacles:=true map_server:=true
+
+
+
+# 2) launch move_base server:
+roslaunch uol_cmp9767m_tutorial mapping_amcl.launch
+or 
+roslaunch uol_cmp9767m_tutorial mapping_fake_localisation.launch
+
+
+
+# 3) run program:
+rosrun my_examples move_avoid_zap.py
+
+
+
 # Set-up ROS and CMP9767m
 
 sudo apt-get update && sudo apt-get upgrade
@@ -23,27 +43,23 @@ catkin_create_pkg my_package_namerospy
 always source bash when in new terminal by: 
 source devel/setup.bash  (now in setup.bash)
 
-# to run thorvald in gazebo:
-roslaunch uol_cmp9767m_base thorvald-sim.launch fake_localisation:=true map_server:=true
-to kill Gazebo after crash:  
+# to kill Gazebo after crash:  
 killall -9 gzserver  
-
-# to run move_base server
-uol_cmp9767m_tutorial move_base.launch
 
 # to run rviz
 with a .rviz config file.  Can also load and saveconfig from within rviz  
 rviz -d `rospack find uol_cmp9767m_base`/rviz/two_robots.rviz  
 
-To add robot model  
+# To add robot model  
 add by display type, robot model  
 change description to /thorvald_001/robot_description  
 
-Dont forget that add bt topic has a lot of options:  
+# Dont forget that add bt topic has a lot of options:  
 E.g.  particecloud, amcl_pose and scan to see localaization (select fixed frame to map)  
 E.g. odometry/base_raw and odometry/filtered to effect of Kalman filer (select fixed frame to odom)
 
-
+# Tune amcl
+Adjust max and min point numbers to stop jumping
 
 
 # git commands
