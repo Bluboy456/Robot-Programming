@@ -39,7 +39,7 @@ class mapping():
         self.angular_speed = 0.7        #robot rotation rate when mapping,radians per second
         self.mapping_start_time = time.time()
         self.mapping_complete = False   #flag that can be interpreted to find out whether mapping is complete
-        self.mapping_duration = 120      #duration of mapping stage in seconds
+        self.mapping_duration = 45      #duration of mapping stage in seconds
         self.rate = rospy.Rate(3)
 
 
@@ -147,8 +147,8 @@ class weeding:
         self.meta_data = rospy.wait_for_message('/map_metadata',MapMetaData ) 
         self.move_base_client = actionlib.SimpleActionClient('/move_base/',MoveBaseAction)
         resolution = self.meta_data.resolution  # metres per cell of occupancy grid
-        self.grid_width = self.meta_data.width * resolution  #convert width from cell count to metres
-        self.grid_height = self.meta_data.height * resolution
+        self.grid_width = self.meta_data.width * resolution  #width is x direction, convert width from cell count to metres
+        self.grid_height = self.meta_data.height * resolution #height is y direction
         self.grid_origin_x = self.meta_data.origin.position.x
         self.grid_origin_y = self.meta_data.origin.position.y
 
@@ -160,8 +160,9 @@ class weeding:
         self.tf_listener = tf.TransformListener()
 
         # traversing settings
-        self.traverse_spacing = 0.5     #spacing in metres between traverses
+        self.traverse_spacing = 1     #spacing in metres between traverses
         self.margin = 3               #distance from boundary of the turning points at end of a traverse (metres)
+
 
         # Get distance of sprayer behind camera
         self.tf_listener.waitForTransform('thorvald_001/kinect2_rgb_optical_frame', 'thorvald_001/sprayer', rospy.Time.now(), rospy.Duration(4.0))
@@ -178,72 +179,107 @@ class weeding:
     # moves robot acroos entire map
     # assumes crop planted in y direction so traverses are in y direction
     def traverse_field(self):
+        self.traversing_done = False    
         self.traverse_up = False      #going downwards
         self.spraying_enabled = False #don't spray until traversing started
 
-        # move to cell (0,0), ie the'bottom left' corner, allowing for margins
-        self.next_x = self.grid_origin_x + self.margin
-        self.next_y = self.grid_origin_y + self.margin  
+        # origin is (0,0), this is the bottom right corner in the initial Gazebo view
+        # +ve x is upwards in this Gazebo view
+        # +ve y is leftwards in this Gazebo view
+        # move to cell (maximum x, maximum y), but inside by margin
+        #  ie the'top left' corner in the initial Gazebo view
+       
+        self.next_x = self.grid_origin_x + self.grid_width - self.margin
+        self.next_y = self.grid_origin_y + self.grid_height - self.margin  
+
         '''
         #DEBUG use this alternative code to move straight to centre so seeing weeds quickly for debug
-        self.next_x = self.grid_origin_x + self.margin + (self.grid_width -2*self.margin)*0.5    
+        # Needs debugging!
+        self.next_x = self.grid_origin_x + self.grid_width - self.margin
         self.next_y = self.grid_origin_y + self.margin + (self.grid_height-2*self.margin)*0.5 
-       '''
+        '''
         #print 'next_y: ' + str(self.next_y) #DEBUG
         self.move_to_goal (self.next_x, self.next_y)
         #print 'reached starting position' #DEBUG
+
+
+        # do the traversing
+        while self.traversing_done == False:  
+            self.traverse_down_and_across()     
+            self.traverse_up_and_across()
+
+    def traverse_down_and_across(self):
+    # traverse  back down (-ve x direction)
+        print 'traverse down started:'  #DEBUG
+        self.traverse_up = False
+        self.spraying_enabled = True
+            # update position, (on assumption that previous goal was reached)
         self.current_x = self.next_x  
         self.current_y = self.next_y
-
+        self.next_x = self.calc_clear_down_distance()  # set goal at margin before first obstacle
+        self.next_y = self.current_y 
+        self.current_x = self.next_x
+        self.current_y = self.next_y
+        self.move_to_goal (self.next_x, self.next_y)
+        if self.move_fail_confirmed == True:
+            return       # robot probably stuck, so go striaght to next traverse
         
-        while True:                   
+        #move across   
+        print 'traverse across after down started:'  #DEBUG 
+        self.spraying_enabled = False     #don't spray while moving to a new row
+        # update current position, (on assumption that previous goal was reached)
+        self.current_x = self.next_x
+        self.current_y = self.next_y
+        self.next_y = self.current_y - self.traverse_spacing
+        if self.next_y < self.grid_origin_y + self.margin:
+            self.traversing_done = True                                      #gone all the way across
+        self.move_to_goal (self.next_x, self.next_y)
+        if self.move_fail_confirmed == True:
+            return       # robot probably stuck, so go striaght to next traverse
+
+
+    def traverse_up_and_across(self):
+        print 'traverse_up started:'  #DEBUG
         # make a traverse up (+ve x direction)
-            self.traverse_up = True
-            self.spraying_enabled = True
-            self.next_x = self.current_x + (self.grid_width - 2 * self.margin)
-            self.next_y = self.current_y 
-            self.move_to_goal (self.next_x, self.next_y)
-            self.current_x = self.next_x
-            self.current_y = self.next_y
-            self.move_to_goal (self.next_x, self.next_y)
-
-        #move across    
-            self.spraying_enabled = False     #don't spray while moving to a new row
-            self.next_y = self.current_y + self.traverse_spacing
-            if self.next_y > (self.grid_height - 2 * self.margin):
-                break                                       #gone all the way across
-            self.next_x = self.current_x
-            self.move_to_goal (self.next_x, self.next_y )
-            self.current_x = self.next_x
-            self.current_y = self.next_y
-            self.move_to_goal (self.next_x, self.next_y)
-
-        # traverse  back (-ve x direction)
-            self.traverse_up = False
-            self.spraying_enabled = True
-            self.next_x = self.current_x - (self.grid_width - 2 * self.margin)
-            self.next_y = self.current_y 
-            self.move_to_goal (self.next_x, self.next_y)
-            self.current_x = self.next_x
-            self.current_y = self.next_y
-            self.move_to_goal (self.next_x, self.next_y)
-
-        #move across to complete one cycle up and down  
-            self.spraying_enabled = False
-            self.next_y = self.current_y + self.traverse_spacing
-            if self.next_y > (self.grid_height - 2 * self.margin):
-                break                                       #gone all the way across
-            self.next_x = self.current_x
-            self.move_to_goal (self.next_x, self.next_y )
-            self.current_x = self.next_x
-            self.current_y = self.next_y
+        self.traverse_up = True
+        self.spraying_enabled = True
+        # update position, (on assumption that previous goal was reached)
+        self.current_x = self.next_x  
+        self.current_y = self.next_y
+        self.next_x = self.calc_clear_up_distance()  # set goal at margin before first obstacle
+        self.next_y = self.current_y                                        # no sideways movement
+        self.move_to_goal (self.next_x, self.next_y)
+        if self.move_fail_confirmed == True:
+            return       # robot probably stuck, so go striaght to next traverse
+        
+        #move across   
+        print 'traverse across after up started:'  #DEBUG 
+        self.spraying_enabled = False     #don't spray while moving to a new row
+        # update current position, (on assumption that previous goal was reached)
+        self.current_x = self.next_x
+        self.current_y = self.next_y
+        self.next_y = self.current_y - self.traverse_spacing
+        if self.next_y < self.grid_origin_y + self.margin:
+            self.traversing_done = True                                      #gone all the way across
+        self.move_to_goal (self.next_x, self.next_y)
+        if self.move_fail_confirmed == True:
+            return       # robot probably stuck, so go striaght to next traverse
 
 
-    
+    def calc_clear_down_distance(self):
+        for x in range(int(self.grid_width - self.margin),  self.margin, -1):
+            if x == 100:   #100 = occupied
+                return (x + self.margin)
 
-    # The following function is adapted from move_base action_client example at 
-    # hotblackrobotics.github.io/en/blog/2018/01/29/action-client-py/
+    def calc_clear_up_distance(self):
+        for x in range(self.margin, int(self.grid_width - self.margin)):
+            if x == 100:   #100 = occupied
+                return (x - self.margin)
+
+
     def move_to_goal (self, x_goal, y_goal):
+
+        self.move_fail_confirmed = False       #this flag will be set by callback if the move fails
         self.move_base_client.wait_for_server()
         goal = MoveBaseGoal()
         goal.target_pose.header.frame_id = 'map'
@@ -257,17 +293,26 @@ class weeding:
             goal.target_pose.pose.orientation.w = 0.7071       
         else:
             goal.target_pose.pose.orientation.w = -0.7071
-        
-        self.move_base_client.send_goal(goal)
-        wait = self.move_base_client.wait_for_result()
-        if not wait:
-            rospy.logerr("Action server not available!")
-            rospy.signal_shutdown("Action server not available!")
-        else:
-            result = self.move_to_goal (self.next_x, self.next_y)
-            print "move_base result:" + str(result)
-            return result
 
+        print 'x goal: '  + str(x_goal) + '   y goal: ' + str(y_goal)  #DEBUG
+        self.move_base_client.send_goal(goal)
+        # TODO debug or remove callback
+        # self.move_base_client.send_goal(goal, done_cb=self.move_base_done_callback)
+        self.move_base_client.wait_for_result()
+
+    # TODO debug or remove this callback
+    '''
+    def move_base_done_callback(self,state, result):
+        # check if move successful (ie status = 3) 
+        if state <> 3:
+             self.move_fail_confirmed = True
+        else:
+            self.move_fail_confirmed = False
+    '''
+
+    
+    
+    
     def update_pose(self,msg):
             self.pose_x = msg.point.x
             self.pose_y = msg.point.y

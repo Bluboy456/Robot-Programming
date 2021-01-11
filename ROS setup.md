@@ -47,8 +47,8 @@ source devel/setup.bash  (now in setup.bash)
 killall -9 gzserver  
 
 # to run rviz
-with a .rviz config file.  Can also load and saveconfig from within rviz  
-rviz -d `rospack find uol_cmp9767m_base`/rviz/two_robots.rviz  
+rviz rviz -d ~/catkin_ws/src/my_examples/rviz_config/mapping.rviz
+
 
 # To add robot model  
 add by display type, robot model  
@@ -79,3 +79,50 @@ set topic to /thorvald_001/teleop_joy/cmd_vel
 # Linux boot issues
 Reinstalling REfInd from MacOS fixes boot to grub problem  
 NB two spaces for newline in this markdown!  
+
+
+# Move_base complete messages
+
+uint8 PENDING         = 0   # The goal has yet to be processed by the action server
+uint8 ACTIVE          = 1   # The goal is currently being processed by the action server
+uint8 PREEMPTED       = 2   # The goal received a cancel request after it started executing
+                            #   and has since completed its execution (Terminal State)
+uint8 SUCCEEDED       = 3   # The goal was achieved successfully by the action server (Terminal State)
+uint8 ABORTED         = 4   # The goal was aborted during execution by the action server due
+                            #    to some failure (Terminal State)
+uint8 REJECTED        = 5   # The goal was rejected by the action server without being processed,
+                            #    because the goal was unattainable or invalid (Terminal State)
+uint8 PREEMPTING      = 6   # The goal received a cancel request after it started executing
+                            #    and has not yet completed execution
+uint8 RECALLING       = 7   # The goal received a cancel request before it started executing,
+                            #    but the action server has not yet confirmed that the goal is canceled
+uint8 RECALLED        = 8   # The goal received a cancel request before it started executing
+                            #    and was successfully cancelled (Terminal State)
+uint8 LOST            = 9   # An action client can determine that a goal is LOST. This should not be
+                            #    sent over the wire by an action server
+
+# example code for move_base callbacks
+    # This answer from the ros community used in part for this function
+    # https://answers.ros.org/question/292061/how-do-i-create-a-callback-based-actionlib-client-in-python/
+        def counter_client():
+        client = actionlib.SimpleActionClient('counter_as', CounterAction)
+        rospy.loginfo("Waiting for action server to come up...")
+        client.wait_for_server()
+
+        client.send_goal(CounterGoal(10),
+                        active_cb=callback_active,
+                        feedback_cb=callback_feedback,
+                        done_cb=callback_done)
+
+        rospy.loginfo("Goal has been sent to the action server.")
+
+    def callback_active():
+        rospy.loginfo("Action server is processing the goal")
+
+    def callback_done(state, result):
+        rospy.loginfo("Action server is done. State: %s, result: %s" % (str(state), str(result)))
+
+    def callback_feedback(feedback):
+        rospy.loginfo("Feedback:%s" % str(feedback))
+    '''
+
