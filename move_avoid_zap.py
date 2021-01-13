@@ -39,7 +39,7 @@ class mapping():
         self.angular_speed = 0.7        #robot rotation rate when mapping,radians per second
         self.mapping_start_time = time.time()
         self.mapping_complete = False   #flag that can be interpreted to find out whether mapping is complete
-        self.mapping_duration = 15      #duration of mapping stage in seconds
+        self.mapping_duration = 45      #duration of mapping stage in seconds
         self.rate = rospy.Rate(3)
 
 
@@ -147,14 +147,13 @@ class weeding:
 
         # Extract map information from metadata message
         print 'occupancy array shape:'
-        print self.occupancy_array.shape
-        self.map_meta_data = rospy.wait_for_message('/map_metadata',MapMetaData ) 
-        self.map_width = self.map_meta_data.width
-        self.map_height = self.map_meta_data.height
-        self.map_resolution = self.map_meta_data.resolution  # metres per cell of occupancy grid
-        self.world_origin_x = self.map_meta_data.origin.position.x
-        self.world_origin_y = self.map_meta_data.origin.position.y
-        print  'origin: ' + str(self.world_origin_x)+ ',' + str(world_)  #DEBUG
+        map_meta_data = rospy.wait_for_message('/map_metadata',MapMetaData ) 
+        self.map_width = map_meta_data.width
+        self.map_height = map_meta_data.height
+        self.map_resolution = map_meta_data.resolution  # metres per cell of occupancy grid
+        self.world_origin_x = map_meta_data.origin.position.x
+        self.world_origin_y = map_meta_data.origin.position.y
+        print  'origin: ' + str(self.world_origin_x)+ ',' + str(self.world_origin_y)  #DEBUG
         print  'resolution: ' + str(self.map_resolution) #DEBUG
         print  'map_width: ' + str(self.map_width) #DEBUG
         print  'map_height: ' + str(self.map_height) #DEBUG
@@ -167,7 +166,8 @@ class weeding:
         
         #convert occupancy grid to an array
         occupancy_grid_message = rospy.wait_for_message('/map',OccupancyGrid )
-        self.occupancy_array = np.asarray(occupancy_grid_message.data, dtype=np.int8).reshape(self.map_height, self.mmap_width)
+        self.occupancy_array = np.asarray(occupancy_grid_message.data, dtype=np.int8).reshape(self.map_height, self.map_width)
+        #self.occupancy_array.fill(0)   #DEBUG force no obstacles in map
         print 'occupancy array shape:'
         print self.occupancy_array.shape
 
@@ -217,7 +217,7 @@ class weeding:
         #  ie the'top left' corner in the initial Gazebo view
        
         self.next_x = self.world_origin_x + self.world_width - self.margin
-        self.next_y = world_ + self.world_height - self.margin  
+        self.next_y = self.world_origin_y + self.world_height - self.margin  
 
         '''
         #DEBUG use this alternative code to move straight to centre so seeing weeds quickly for debug
@@ -248,8 +248,7 @@ class weeding:
         self.current_x = self.next_x
         self.current_y = self.next_y
         self.move_to_goal (self.next_x, self.next_y)
-        if self.move_fail_confirmed == True:
-            return       # robot probably stuck, so go striaght to next traverse
+
         
         #move across   
         print 'traverse across after down started:'  #DEBUG 
@@ -258,11 +257,10 @@ class weeding:
         self.current_x = self.next_x
         self.current_y = self.next_y
         self.next_y = self.current_y - self.traverse_spacing
-        if self.next + self.margin:
+        if self.next_y < self.margin:
             self.traversing_done = True                                      #gone all the way across
         self.move_to_goal (self.next_x, self.next_y)
-        if self.move_fail_confirmed == True:
-            return       # robot probably stuck, so go striaght to next traverse
+
 
 
     def traverse_up_and_across(self):
@@ -276,8 +274,7 @@ class weeding:
         self.next_x = self.calc_clear_up_distance()  # set goal at margin before first obstacle
         self.next_y = self.current_y                                        # no sideways movement
         self.move_to_goal (self.next_x, self.next_y)
-        if self.move_fail_confirmed == True:
-            return       # robot probably stuck, so go striaght to next traverse
+
         
         #move across   
         print 'traverse across after up started:'  #DEBUG 
@@ -286,40 +283,60 @@ class weeding:
         self.current_x = self.next_x
         self.current_y = self.next_y
         self.next_y = self.current_y - self.traverse_spacing
-        if self.next + self.margin:
+        if self.next_y < self.margin:
             self.traversing_done = True                                      #gone all the way across
         self.move_to_goal (self.next_x, self.next_y)
-        if self.move_fail_confirmed == True:
-            return       # robot probably stuck, so go striaght to next traverse
+
 
 
     def calc_clear_down_distance(self):
-        # need to convert from metres to occupancy grid data points by dividing by resolution
-        for x in range(self.world_to_map_x(self.current_x),  0, -1):   #scan down from current postion to find obstacle
-            print 'x: ' +str(x)
-            if self.occupancy_array[x, self.world_to_map_y(self.current_y)] == 100:   #100 = occupied
-                return float((self.map_to_world_x(x)) + self.margin)   #convert from occupancy grid data points to meteres
-        return float(self.map_to_world_x(0) + self.margin)   #deal with case where no obstacle found
+        # convert world postion to map co-ordinates
+        current_map_x = self.world_to_map_x(self.current_x)
+        current_map_y = self.world_to_map_y(self.current_y)
+        print 'clear_down entered'
+        print 'world x:' + str(self.current_x) + ',' + 'world y:' + str(self.current_y)
+        print 'map x:' + str(current_map_x) +','+ 'map y:' + str(current_map_y)
+        
+        for map_x in range(current_map_x,  0, -1):   #scan down from current postion to find obstacle
+            if self.occupancy_array[map_x, current_map_y] == 100:   #100 = occupied
+                obstacle_in_world_x = self.map_to_world_x(map_x)
+                print 'obstacle found at map_x = ' + str(map_x)  + 'world_x = ' + str(obstacle_in_world_x)
+                safe_x_in_world = float(obstacle_in_world_x + self.margin)
+                return safe_x_in_world  #convert from occupancy grid data points to meteres
+        #deal with case where no obstacle found
+        bottom_world_safe_x =  float(self.map_to_world_x(0) +self.margin)
+        print 'no obstacle found: safe world_x = ' + str(bottom_world_safe_x) 
+        return bottom_world_safe_x   #deal with case where no obstacle found
+
 
     def calc_clear_up_distance(self):
-        for x in range(self.world_to_map_x(self.current_x), self.occupancy_array.shape[0]-1): #scan up from current postion to find obstacle
-            print 'x: ' +str(x)
-            if self.occupancy_array[x, self.world_to_map_y(self.current_y)] == 100:   #100 = occupied
-                return float((self.map_to_world_x(x)) - self.margin)  #move base wants goals as floats, so make sure
-        return float(self.map_to_world_x(self.occupancy_array.shape[0]-1) - self.margin)  #deal with case where no obstacle found
+        # convert world postion to map co-ordinates
+        current_map_x = self.world_to_map_x(self.current_x)
+        current_map_y = self.world_to_map_y(self.current_y)
+        print 'up entered'
+        print 'world x:' + str(self.current_x) + ',' + 'world y:' + str(self.current_y)
+        print 'map x:' + str(current_map_x) +','+ 'map y:' + str(current_map_y)
+        for map_x in range(current_map_x, self.map_width-1): #scan up from current postion to find obstacle
+            if self.occupancy_array[map_x, current_map_y] == 100:   #100 = occupied
+                obstacle_in_world_x = self.map_to_world_x(map_x)       
+                print 'obstacle found at map_x = ' + str(map_x)  + '  world_x = ' + str(obstacle_in_world_x)                     
+                return float(obstacle_in_world_x - self.margin)  #move base wants goals as floats, so make sure
+        #deal with case where no obstacle found
+        top_world_safe_x = float(self.map_to_world_x(self.map_width-1) - self.margin)
+        return top_world_safe_x  #deal with case where no obstacle found
 
-    def map_to_world_x(self, grid_x):
-            return self.map_resolution * grid_x + self.world_origin_x
+    # helper functions to convert between occupancy map and world
+    def map_to_world_x(self, map_x):
+            return self.map_resolution * map_x + self.world_origin_x
+    def map_to_world_y(self, map_y):
+            return self.map_resolution * map_y + self.world_origin_y
 
-    def map_to_world_y(self, grid_y):
-            return self.map_resolution * grid_y + world_   
+    def world_to_map_x(self, world_x):
+            return  int((world_x - self.world_origin_x)/self.map_resolution)
+    def world_to_map_y(self, world_y):
+            return  int((world_y - self.world_origin_y)/self.map_resolution)
     
-    def world_to_map_x(self, metres_x):
-            return  int((metres_x - self.world_origin_x)/self.map_resolution)
-
-    def world_to_map_y(self, metres_y):
-            return  int((metres_y - world_)/self.map_resolution)
-
+    
     def move_to_goal (self, x_goal, y_goal):
         self.move_base_client.wait_for_server()
         goal = MoveBaseGoal()
@@ -331,9 +348,9 @@ class weeding:
         #rotate 90 deg in appropriate sense, to be ready to head off in correct direction 
         goal.target_pose.pose.orientation.z = 0.7071
         if self.traverse_up == True:
-            goal.target_pose.pose.orientation.w = 0.7071       
+            goal.target_pose.pose.orientation.w = -0.7071       
         else:
-            goal.target_pose.pose.orientation.w = -0.7071
+            goal.target_pose.pose.orientation.w = +0.7071
 
         print 'x goal: '  + str(x_goal) + '   y goal: ' + str(y_goal)  #DEBUG
         self.move_base_client.send_goal(goal)
@@ -462,15 +479,7 @@ class weeding:
                 spray()
             except rospy.ServiceException as e:
                 print("Spray service call failed: %s"%e)
-
-    def pause_movement(self, pause_time):  #TODO ?pause routine not working
-        self.movement_paused = True     #set flag to stop laser callback moving robot
-        move_cmd = Twist()
-        move_cmd.linear.x = 0
-        move_cmd.linear.y = 0
-        self.cmd_vel_pub.publish(move_cmd)
-        rospy.sleep(pause_time)
-        self.movement_paused = False     #pause is over        
+     
 
 # Main Code
 if __name__ == '__main__':
