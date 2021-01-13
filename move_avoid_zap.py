@@ -82,7 +82,6 @@ class mapping():
             angular_vel = 0.0
             if (time_in_secs_mod_ten < 5):
                 angular_vel = (time_in_secs_mod_ten-2)/5.0
-            #print 'random angular velocity: ' + str (angular_vel)  #DEBUG
 
 
             self.motion.angular.z = angular_vel
@@ -145,14 +144,18 @@ class weeding:
 
         #mapping settings
 
-        # Extract map information from metadata message
-        print 'occupancy array shape:'
+     
         map_meta_data = rospy.wait_for_message('/map_metadata',MapMetaData ) 
-        self.map_width = map_meta_data.width
-        self.map_height = map_meta_data.height
+    
+        #convert occupancy grid to an array and extract metadata
+        occupancy_grid_message = rospy.wait_for_message('/map',OccupancyGrid )
+        self.occupancy_array = np.asarray(occupancy_grid_message.data, dtype=np.int8).reshape(map_meta_data.height, map_meta_data.width)
+        self.map_width = self.occupancy_array.shape[0]
+        self.map_height = self.occupancy_array.shape[1]
         self.map_resolution = map_meta_data.resolution  # metres per cell of occupancy grid
         self.world_origin_x = map_meta_data.origin.position.x
         self.world_origin_y = map_meta_data.origin.position.y
+
         print  'origin: ' + str(self.world_origin_x)+ ',' + str(self.world_origin_y)  #DEBUG
         print  'resolution: ' + str(self.map_resolution) #DEBUG
         print  'map_width: ' + str(self.map_width) #DEBUG
@@ -167,9 +170,8 @@ class weeding:
         #convert occupancy grid to an array
         occupancy_grid_message = rospy.wait_for_message('/map',OccupancyGrid )
         self.occupancy_array = np.asarray(occupancy_grid_message.data, dtype=np.int8).reshape(self.map_height, self.map_width)
-        #self.occupancy_array.fill(0)   #DEBUG force no obstacles in map
-        print 'occupancy array shape:'
-        print self.occupancy_array.shape
+        print 'occupancy array:'
+        print self.occupancy_array
 
 
         self.move_base_client = actionlib.SimpleActionClient('/move_base/',MoveBaseAction)
@@ -183,8 +185,9 @@ class weeding:
         self.tf_listener = tf.TransformListener()
 
         # traversing settings
-        self.traverse_spacing = 1.0     #spacing in metres between traverses
-        self.margin = 3.0              #distance from boundary of the turning points at end of a traverse (metres)
+        self.traverse_spacing = 1.0     #spacing in metres between traverses (float)
+        self.margin = 3.0              #distance from boundary of the turning points at end of a traverse (metres, float)
+        self.obs_breadth = 20              #max distance to detect obstacles either side of path (map cells, integer)
 
 
         # Get distance of sprayer behind camera
@@ -215,19 +218,17 @@ class weeding:
         # +ve y is leftwards in this Gazebo view
         # move to cell (maximum x, maximum y), but inside by margin
         #  ie the'top left' corner in the initial Gazebo view
-       
-        self.next_x = self.world_origin_x + self.world_width - self.margin
-        self.next_y = self.world_origin_y + self.world_height - self.margin  
+        #self.next_x = self.world_origin_x + self.world_width - self.margin
+        #self.next_y = self.world_origin_y + self.world_height - self.margin  
 
-        '''
+        
         #DEBUG use this alternative code to move straight to centre so seeing weeds quickly for debug
-        # Needs debugging!
         self.next_x = self.world_origin_x + self.world_width - self.margin
-        self.next + self.margin + (self.world_height-2*self.margin)*0.5 
-        '''
-        #print 'next_y: ' + str(self.next_y) #DEBUG
+        self.next_y = int(self.world_origin_y + self.world_height * 0.6)
+       
+
         self.move_to_goal (self.next_x, self.next_y)
-        #print 'reached starting position' #DEBUG
+
 
 
         # do the traversing
@@ -257,7 +258,7 @@ class weeding:
         self.current_x = self.next_x
         self.current_y = self.next_y
         self.next_y = self.current_y - self.traverse_spacing
-        if self.next_y < self.margin:
+        if self.next_y < self.world_origin_y + self.margin:
             self.traversing_done = True                                      #gone all the way across
         self.move_to_goal (self.next_x, self.next_y)
 
@@ -283,7 +284,7 @@ class weeding:
         self.current_x = self.next_x
         self.current_y = self.next_y
         self.next_y = self.current_y - self.traverse_spacing
-        if self.next_y < self.margin:
+        if self.next_y < self.world_origin_y + self.margin:
             self.traversing_done = True                                      #gone all the way across
         self.move_to_goal (self.next_x, self.next_y)
 
@@ -298,11 +299,13 @@ class weeding:
         print 'map x:' + str(current_map_x) +','+ 'map y:' + str(current_map_y)
         
         for map_x in range(current_map_x,  0, -1):   #scan down from current postion to find obstacle
-            if self.occupancy_array[map_x, current_map_y] == 100:   #100 = occupied
-                obstacle_in_world_x = self.map_to_world_x(map_x)
-                print 'obstacle found at map_x = ' + str(map_x)  + 'world_x = ' + str(obstacle_in_world_x)
-                safe_x_in_world = float(obstacle_in_world_x + self.margin)
-                return safe_x_in_world  #convert from occupancy grid data points to meteres
+            #scan either side of path
+            for map_y in range(current_map_y - self.obs_breadth, current_map_y + self.obs_breadth):
+                if self.occupancy_array[map_x, map_y] == 100:   #100 = occupied
+                    obstacle_in_world_x = self.map_to_world_x(map_x)
+                    print 'obstacle found at map_x = ' + str(map_x)  + 'world_x = ' + str(obstacle_in_world_x)
+                    safe_x_in_world = float(obstacle_in_world_x + self.margin)
+                    return safe_x_in_world  #convert from occupancy grid data points to meteres
         #deal with case where no obstacle found
         bottom_world_safe_x =  float(self.map_to_world_x(0) +self.margin)
         print 'no obstacle found: safe world_x = ' + str(bottom_world_safe_x) 
@@ -317,10 +320,12 @@ class weeding:
         print 'world x:' + str(self.current_x) + ',' + 'world y:' + str(self.current_y)
         print 'map x:' + str(current_map_x) +','+ 'map y:' + str(current_map_y)
         for map_x in range(current_map_x, self.map_width-1): #scan up from current postion to find obstacle
-            if self.occupancy_array[map_x, current_map_y] == 100:   #100 = occupied
-                obstacle_in_world_x = self.map_to_world_x(map_x)       
-                print 'obstacle found at map_x = ' + str(map_x)  + '  world_x = ' + str(obstacle_in_world_x)                     
-                return float(obstacle_in_world_x - self.margin)  #move base wants goals as floats, so make sure
+            #scan either side of path
+            for map_y in range(current_map_y - self.obs_breadth, current_map_y + self.obs_breadth):
+                if self.occupancy_array[map_x, map_y] == 100:   #100 = occupied
+                    obstacle_in_world_x = self.map_to_world_x(map_x)       
+                    print 'obstacle found at map_x = ' + str(map_x)  + '  world_x = ' + str(obstacle_in_world_x)                     
+                    return float(obstacle_in_world_x - self.margin)  #move base wants goals as floats, so make sure
         #deal with case where no obstacle found
         top_world_safe_x = float(self.map_to_world_x(self.map_width-1) - self.margin)
         return top_world_safe_x  #deal with case where no obstacle found
@@ -347,10 +352,10 @@ class weeding:
 
         #rotate 90 deg in appropriate sense, to be ready to head off in correct direction 
         goal.target_pose.pose.orientation.z = 0.7071
-        if self.traverse_up == True:
-            goal.target_pose.pose.orientation.w = -0.7071       
-        else:
-            goal.target_pose.pose.orientation.w = +0.7071
+        #if self.traverse_up == True:  #TODO debug rotation directions
+        goal.target_pose.pose.orientation.w = -0.7071       
+        #else:     #TODO debug rotation directions
+         #   goal.target_pose.pose.orientation.w = +0.7071   #TODO debug rotation directions
 
         print 'x goal: '  + str(x_goal) + '   y goal: ' + str(y_goal)  #DEBUG
         self.move_base_client.send_goal(goal)
@@ -364,8 +369,7 @@ class weeding:
     def update_pose(self,msg):
             self.pose_x = msg.point.x
             self.pose_y = msg.point.y
-            # print 'pose x: ' + self.pose_x #DEBUG
-            # print 'pose y: ' + self.pose_y #DEBUG
+
 
             
     def camera_callback(self,data):
@@ -408,7 +412,6 @@ class weeding:
 
         detector = cv2.SimpleBlobDetector_create()
         keypoints = detector.detect(mask_g)
-        #print keypoints #DEBUG
 	    # Draw detected blobs as red circles.
 	    # cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS ensures the size of the circle corresponds to the size of blob
         res_g_with_blobs = cv2.drawKeypoints(res_g, keypoints, np.array([]), (0,0,255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
@@ -449,9 +452,6 @@ class weeding:
 
         # weed found ...
         if (keypoints and self.spraying_enabled):
-            #print 'weed found: x pose: ' +str(self.x_pose) #DEBUG
-            #print 'weed found: y pose: ' +str(self.y_pose)#DEBUG
-            #print 'x pose to spray weed = ' + str(self.x_pose + self.camera_sprayer_distance) #DEBUG
             # add weed location to to-spray list, taking into account direction of motion
             if self.traverse_up:
                 self.weed_location_queue.append(self.x_pose + self.camera_sprayer_distance)
@@ -463,9 +463,6 @@ class weeding:
         # TODO  Dont spray if y error too large (because avoiding obstacle)
         if self.weed_location_queue:                                #if queue has weed_locations in it
             if abs(self.y_pose - self.next_y) < 0.1:         #only spray if cross-track error small
-                #print 'next weed location' + str(self.weed_location_queue[0]) #DEBUG
-                #print  'current location' + str(self.x_pose) #DEBUG
-                #print 'weed error' + str(abs(self.weed_location_queue[0]- self.x_pose)) #DEBUG
                 if abs(self.weed_location_queue[0]- self.x_pose) < self.weed_location_tolerance:    #and sprayer is within 10cm of weed TODO reduce this if possible
                     self.spray()
                     self.weed_location_queue.pop(0)          # remove location from the queue now that it has been sprayed
@@ -492,9 +489,8 @@ if __name__ == '__main__':
         #wait while mapping phase takes place
         while not(m.mapping_complete):
             time.sleep(1)      #Just check periodically to reduce computational load
-        
+
         # TRAVERSE FIELD, ID WEEDS AND SPRAY
-        #rospy.init_node('weeding', anonymous=True)
         w = weeding()     
         w.traverse_field()   
 

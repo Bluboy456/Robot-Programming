@@ -2,8 +2,11 @@
 # TO RUN PROGRAM
 
 # 1) Launch Gazebo:
+without gmapping, uses blank map:
 roslaunch uol_cmp9767m_base thorvald-sim.launch obstacles:=true map_server:=true
 
+with gmapping:
+roslaunch uol_cmp9767m_base thorvald-sim.launch obstacles:=true 
 
 
 # 2) launch move_base server:
