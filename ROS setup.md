@@ -1,3 +1,18 @@
+# DEMONSTRATION PROCEDURE
+
+set up 4 windows in Terminator for gazebo, mapping, rviz and programm
+
+
+
+1) No obstacles, map_server:=true  	|fake_localisation	|  Demonstrate 'mapping', traversing and spraying on empty field
+1) No obstacles, map_server:=true  	|  amcl_localisation	|  Show again with amcl localisation
+2) No obstacles, map_server:=false 	|  fake_localisation	|  Move_base fails - why??
+3) With obstacles, map_server:=true  	|  fake_localisation	|  robot gets stuck because only using local costmap
+4) With obstacles, no map_server:=false |  fake_localisation	|   Fails!
+
+
+
+
 
 # TO RUN PROGRAM
 
