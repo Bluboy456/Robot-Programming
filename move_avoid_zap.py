@@ -33,13 +33,13 @@ class mapping():
         self.angle_to_obstacle = 0.0
         self.distance_to_obstacle = 10.0
 
-        self.clearance_from_obstacle = 2.5  #robot turns at this distance when mapping (metres)
+        self.clearance_from_obstacle = 3  #robot turns at this distance when mapping (metres)
 
         self.linear_speed = 0.7         #robot speed when mapping, metres per second
         self.angular_speed = 0.7        #robot rotation rate when mapping,radians per second
         self.mapping_start_time = time.time()
         self.mapping_complete = False   #flag that can be interpreted to find out whether mapping is complete
-        self.mapping_duration = 45      #duration of mapping stage in seconds
+        self.mapping_duration = 15      #duration of mapping stage in seconds
         self.rate = rospy.Rate(3)
 
 
@@ -81,7 +81,7 @@ class mapping():
             time_in_secs_mod_ten = int(round(time.time())) % 10
             angular_vel = 0.0
             if (time_in_secs_mod_ten < 5):
-                angular_vel = (time_in_secs_mod_ten-2)/10.0
+                angular_vel = (time_in_secs_mod_ten-2)/5.0
             #print 'random angular velocity: ' + str (angular_vel)  #DEBUG
 
 
@@ -142,16 +142,39 @@ class mapping():
 class weeding:   
 
     def __init__(self):
-        #mapping settings
-        self.occupancy_grid = rospy.wait_for_message('/map',OccupancyGrid )
-        self.meta_data = rospy.wait_for_message('/map_metadata',MapMetaData ) 
-        self.move_base_client = actionlib.SimpleActionClient('/move_base/',MoveBaseAction)
-        resolution = self.meta_data.resolution  # metres per cell of occupancy grid
-        self.grid_width = self.meta_data.width * resolution  #width is x direction, convert width from cell count to metres
-        self.grid_height = self.meta_data.height * resolution #height is y direction
-        self.grid_origin_x = self.meta_data.origin.position.x
-        self.grid_origin_y = self.meta_data.origin.position.y
 
+        #mapping settings
+
+        # Extract map information from metadata message
+        print 'occupancy array shape:'
+        print self.occupancy_array.shape
+        self.map_meta_data = rospy.wait_for_message('/map_metadata',MapMetaData ) 
+        self.map_width = self.map_meta_data.width
+        self.map_height = self.map_meta_data.height
+        self.map_resolution = self.map_meta_data.resolution  # metres per cell of occupancy grid
+        self.world_origin_x = self.map_meta_data.origin.position.x
+        self.world_origin_y = self.map_meta_data.origin.position.y
+        print  'origin: ' + str(self.world_origin_x)+ ',' + str(world_)  #DEBUG
+        print  'resolution: ' + str(self.map_resolution) #DEBUG
+        print  'map_width: ' + str(self.map_width) #DEBUG
+        print  'map_height: ' + str(self.map_height) #DEBUG
+
+             
+        self.world_width = self.map_width * self.map_resolution  #width is x direction, convert width from cell count to metres
+        self.world_height = self.map_height * self.map_resolution #height is y direction
+        print  'world_width: ' + str(self.world_width) #DEBUG
+        print  'world_height: ' + str(self.world_height) #DEBUG
+        
+        #convert occupancy grid to an array
+        occupancy_grid_message = rospy.wait_for_message('/map',OccupancyGrid )
+        self.occupancy_array = np.asarray(occupancy_grid_message.data, dtype=np.int8).reshape(self.map_height, self.mmap_width)
+        print 'occupancy array shape:'
+        print self.occupancy_array.shape
+
+
+        self.move_base_client = actionlib.SimpleActionClient('/move_base/',MoveBaseAction)
+       
+       
         # Camera settings
         self.image_sub = rospy.Subscriber("/thorvald_001/kinect2_camera/hd/image_color_rect",Image,self.camera_callback)
         self.bridge_object = CvBridge()
@@ -160,8 +183,8 @@ class weeding:
         self.tf_listener = tf.TransformListener()
 
         # traversing settings
-        self.traverse_spacing = 1     #spacing in metres between traverses
-        self.margin = 3               #distance from boundary of the turning points at end of a traverse (metres)
+        self.traverse_spacing = 1.0     #spacing in metres between traverses
+        self.margin = 3.0              #distance from boundary of the turning points at end of a traverse (metres)
 
 
         # Get distance of sprayer behind camera
@@ -174,7 +197,11 @@ class weeding:
         self.pose_sub = rospy.Subscriber("/Pose",Pose,self.update_pose)
         self.spraying_enabled = False
         self.weed_location_tolerance = 0.1  #allowable error in sprayer position relative to weed
-        
+
+        self.rate = rospy.Rate(3)
+
+
+
     
     # moves robot acroos entire map
     # assumes crop planted in y direction so traverses are in y direction
@@ -189,14 +216,14 @@ class weeding:
         # move to cell (maximum x, maximum y), but inside by margin
         #  ie the'top left' corner in the initial Gazebo view
        
-        self.next_x = self.grid_origin_x + self.grid_width - self.margin
-        self.next_y = self.grid_origin_y + self.grid_height - self.margin  
+        self.next_x = self.world_origin_x + self.world_width - self.margin
+        self.next_y = world_ + self.world_height - self.margin  
 
         '''
         #DEBUG use this alternative code to move straight to centre so seeing weeds quickly for debug
         # Needs debugging!
-        self.next_x = self.grid_origin_x + self.grid_width - self.margin
-        self.next_y = self.grid_origin_y + self.margin + (self.grid_height-2*self.margin)*0.5 
+        self.next_x = self.world_origin_x + self.world_width - self.margin
+        self.next + self.margin + (self.world_height-2*self.margin)*0.5 
         '''
         #print 'next_y: ' + str(self.next_y) #DEBUG
         self.move_to_goal (self.next_x, self.next_y)
@@ -231,7 +258,7 @@ class weeding:
         self.current_x = self.next_x
         self.current_y = self.next_y
         self.next_y = self.current_y - self.traverse_spacing
-        if self.next_y < self.grid_origin_y + self.margin:
+        if self.next + self.margin:
             self.traversing_done = True                                      #gone all the way across
         self.move_to_goal (self.next_x, self.next_y)
         if self.move_fail_confirmed == True:
@@ -259,7 +286,7 @@ class weeding:
         self.current_x = self.next_x
         self.current_y = self.next_y
         self.next_y = self.current_y - self.traverse_spacing
-        if self.next_y < self.grid_origin_y + self.margin:
+        if self.next + self.margin:
             self.traversing_done = True                                      #gone all the way across
         self.move_to_goal (self.next_x, self.next_y)
         if self.move_fail_confirmed == True:
@@ -267,19 +294,33 @@ class weeding:
 
 
     def calc_clear_down_distance(self):
-        for x in range(int(self.grid_width - self.margin),  self.margin, -1):
-            if x == 100:   #100 = occupied
-                return (x + self.margin)
+        # need to convert from metres to occupancy grid data points by dividing by resolution
+        for x in range(self.world_to_map_x(self.current_x),  0, -1):   #scan down from current postion to find obstacle
+            print 'x: ' +str(x)
+            if self.occupancy_array[x, self.world_to_map_y(self.current_y)] == 100:   #100 = occupied
+                return float((self.map_to_world_x(x)) + self.margin)   #convert from occupancy grid data points to meteres
+        return float(self.map_to_world_x(0) + self.margin)   #deal with case where no obstacle found
 
     def calc_clear_up_distance(self):
-        for x in range(self.margin, int(self.grid_width - self.margin)):
-            if x == 100:   #100 = occupied
-                return (x - self.margin)
+        for x in range(self.world_to_map_x(self.current_x), self.occupancy_array.shape[0]-1): #scan up from current postion to find obstacle
+            print 'x: ' +str(x)
+            if self.occupancy_array[x, self.world_to_map_y(self.current_y)] == 100:   #100 = occupied
+                return float((self.map_to_world_x(x)) - self.margin)  #move base wants goals as floats, so make sure
+        return float(self.map_to_world_x(self.occupancy_array.shape[0]-1) - self.margin)  #deal with case where no obstacle found
 
+    def map_to_world_x(self, grid_x):
+            return self.map_resolution * grid_x + self.world_origin_x
+
+    def map_to_world_y(self, grid_y):
+            return self.map_resolution * grid_y + world_   
+    
+    def world_to_map_x(self, metres_x):
+            return  int((metres_x - self.world_origin_x)/self.map_resolution)
+
+    def world_to_map_y(self, metres_y):
+            return  int((metres_y - world_)/self.map_resolution)
 
     def move_to_goal (self, x_goal, y_goal):
-
-        self.move_fail_confirmed = False       #this flag will be set by callback if the move fails
         self.move_base_client.wait_for_server()
         goal = MoveBaseGoal()
         goal.target_pose.header.frame_id = 'map'
@@ -296,19 +337,9 @@ class weeding:
 
         print 'x goal: '  + str(x_goal) + '   y goal: ' + str(y_goal)  #DEBUG
         self.move_base_client.send_goal(goal)
-        # TODO debug or remove callback
-        # self.move_base_client.send_goal(goal, done_cb=self.move_base_done_callback)
         self.move_base_client.wait_for_result()
 
-    # TODO debug or remove this callback
-    '''
-    def move_base_done_callback(self,state, result):
-        # check if move successful (ie status = 3) 
-        if state <> 3:
-             self.move_fail_confirmed = True
-        else:
-            self.move_fail_confirmed = False
-    '''
+
 
     
     
@@ -318,14 +349,16 @@ class weeding:
             self.pose_y = msg.point.y
             # print 'pose x: ' + self.pose_x #DEBUG
             # print 'pose y: ' + self.pose_y #DEBUG
+
+            
     def camera_callback(self,data):
-        '''
+
         # control how often camera image is processed
         if time.time() < self.camera_timer_start_time + self.camera_interval:   
             return                                   #do nothing if camera interval not up
         else:
             self.camera_timer_start_time = time.time()  #else reset timer and carry on to process image
-        '''
+        
 
         # convert image message to OpenCV format
         try:
