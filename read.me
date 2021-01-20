@@ -1,0 +1,42 @@
+### Stuart Jessup
+## Robot Programming Assignment
+January 2021
+
+## 1) Specialism
+This assignment focuses on the navigation specialism.
+
+
+## 2) Overview
+
+The solution consists of a mapping and a traversing object, which are run sequentially.
+
+The mapping object creates a map of the field.  The robot moves randomly around the field using reactive collision avoidance.  
+
+The  traversing object drives the robot up and down the field in rows. The camera image is processed using a blob detector to locate weeds. The location of a weed is queued and when the sprayer is calculated to have moved over the weed, the sprayer is activated.  
+
+A look-ahead is performed before the start of each traverse. The occupancy map is examined and the distance to be travelled is truncated if an obstacle is found in the robot’s path.
+
+## 3) Operation
+The code uses launch files from a fork of the uol_cmp9767m_tutorial repository and is zipped with this fork.
+
+
+### 1) Launch Gazebo:
+Basic spraying and traversing is best demonstrated with 
+roslaunch uol_cmp9767m_base thorvald-sim.launch fake_locatisation:=True map_server:=True obstacles:=False
+
+Set map_server:=False and obstacles:=True to for full operation
+
+### 2) Launch localisation, mapping and move_base:
+roslaunch uol_cmp9767m_tutorial mapping_fake_localisation.launch
+
+### 3) Run program:
+rosrun my_examples move_avoid_zap.py
+
+### 4) AMCL Localisation
+To try amcl localisation (doesn't work very well).  Launch Thorvald with fake_locatisation:=False and run roslaunch uol_cmp9767m_tutorial mapping_amcl.launch instead of roslaunch uol_cmp9767m_tutorial mapping_fake_localisation.launch
+
+
+### Zipped Files
+move_avoid_zap.py  
+uol_cmp9767m_tutorial repo fork  
+read.me (this file)
