@@ -4,7 +4,31 @@ set up 4 windows in Terminator for gazebo, mapping, rviz and programm
 
 
 
-1) No obstacles, map_server:=true  	|fake_localisation	|  Demonstrate 'mapping', traversing and spraying on empty field
+1) No obstacles
+map time = 30 sec
+roslaunch uol_cmp9767m_base thorvald-sim.launch obstacles:=false map_server:=true fake_localisation:=true
+roslaunch uol_cmp9767m_tutorial mapping_fake_localisation.launch
+
+After spraying, put box in front in gazebo and demo move_base avoidance
+
+Then discuss look ahead feature in global costmap, but doesn't work well - incorrect map
+DEmo problems with obstacles:= true
+
+
+
+
+
+
+
+
+
+2) With obstacles
+map time = 30 sec
+roslaunch uol_cmp9767m_base thorvald-sim.launch obstacles:=true map_server:=true fake_localisation:=true
+roslaunch uol_cmp9767m_tutorial mapping_fake_localisation.launch
+
+
+|  Demonstrate 'mapping', traversing and spraying on empty field
 1) No obstacles, map_server:=true  	|  amcl_localisation	|  Show again with amcl localisation
 2) No obstacles, map_server:=false 	|  fake_localisation	|  Move_base fails - why??
 3) With obstacles, map_server:=true  	|  fake_localisation	|  robot gets stuck because only using local costmap

@@ -39,7 +39,7 @@ class mapping():
         self.angular_speed = 0.7        #robot rotation rate when mapping,radians per second
         self.mapping_start_time = time.time()
         self.mapping_complete = False   #flag that can be interpreted to find out whether mapping is complete
-        self.mapping_duration = 45      #duration of mapping stage in seconds
+        self.mapping_duration = 30      #duration of mapping stage in seconds
         self.rate = rospy.Rate(3)
 
 
